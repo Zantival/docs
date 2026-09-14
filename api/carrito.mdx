@@ -1,0 +1,241 @@
+---
+title: "Endpoints del carrito de compras en la API de FusaShop"
+sidebarTitle: "Carrito"
+description: "Gestiona el carrito de compras del usuario autenticado: consulta el contenido, agrega productos y elimina ítems usando la API REST de FusaShop."
+---
+
+El carrito de compras en FusaShop está asociado de forma única a cada usuario con rol `consumer`. A través de la API puedes consultar su contenido, agregar productos con cantidad personalizada y eliminar ítems individuales. Todos los endpoints del carrito requieren autenticación con un token Sanctum válido.
+
+<Warning>
+  Los tres endpoints del carrito (`GET /api/cart`, `POST /api/cart`, `DELETE /api/cart/{item}`) requieren un token Bearer válido. Incluye el encabezado `Authorization: Bearer {token}` en cada solicitud. Sin él, la API responde con `401 Unauthorized`.
+</Warning>
+
+---
+
+## Consultar el carrito
+
+Devuelve el carrito del usuario autenticado junto con todos sus ítems y el detalle completo de cada producto asociado. Si el usuario aún no tiene carrito (caso de merchants que no lo generan en el registro), se crea uno vacío automáticamente.
+
+```http
+GET /api/cart
+```
+
+### Campos de la respuesta
+
+<ResponseField name="id" type="integer">
+  Identificador único del carrito.
+</ResponseField>
+
+<ResponseField name="user_id" type="integer">
+  ID del usuario propietario del carrito.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Fecha y hora de creación del carrito en formato ISO 8601.
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Fecha y hora de la última actualización en formato ISO 8601.
+</ResponseField>
+
+<ResponseField name="items" type="array">
+  Lista de ítems en el carrito. Cada elemento contiene los campos del `CartItem` más la relación `product`.
+
+  <ResponseField name="items[].id" type="integer">
+    Identificador único del ítem en el carrito.
+  </ResponseField>
+
+  <ResponseField name="items[].cart_id" type="integer">
+    ID del carrito al que pertenece el ítem.
+  </ResponseField>
+
+  <ResponseField name="items[].product_id" type="integer">
+    ID del producto agregado.
+  </ResponseField>
+
+  <ResponseField name="items[].quantity" type="integer">
+    Cantidad de unidades del producto en el carrito.
+  </ResponseField>
+
+  <ResponseField name="items[].selected_options" type="array | null">
+    Opciones seleccionadas por el usuario (p. ej. talla, color). Puede ser `null`.
+  </ResponseField>
+
+  <ResponseField name="items[].product" type="object">
+    Objeto con todos los campos del producto asociado (ver [modelo Product](/api/productos)).
+  </ResponseField>
+</ResponseField>
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X GET "https://tusitio.com/api/cart" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210"
+```
+
+```json Respuesta 200 OK
+{
+  "id": 18,
+  "user_id": 42,
+  "created_at": "2025-01-15T10:30:00.000000Z",
+  "updated_at": "2025-01-15T11:45:00.000000Z",
+  "items": [
+    {
+      "id": 55,
+      "cart_id": 18,
+      "product_id": 7,
+      "quantity": 2,
+      "selected_options": ["talla-m"],
+      "created_at": "2025-01-15T11:45:00.000000Z",
+      "updated_at": "2025-01-15T11:45:00.000000Z",
+      "product": {
+        "id": 7,
+        "merchant_id": 3,
+        "name": "Camiseta Artesanal Bordada",
+        "slug": "camiseta-artesanal-bordada",
+        "description": "Camiseta 100% algodón con bordado a mano de motivos andinos.",
+        "price": "35000.00",
+        "stock": 50,
+        "category": "ropa",
+        "image": "products/camiseta-andina.jpg",
+        "available_options": ["talla-s", "talla-m", "talla-l"],
+        "images": ["products/camiseta-andina-front.jpg"],
+        "is_active": true,
+        "specifications": { "material": "100% algodón" },
+        "created_at": "2025-01-10T08:00:00.000000Z",
+        "updated_at": "2025-01-12T14:20:00.000000Z"
+      }
+    }
+  ]
+}
+```
+
+</CodeGroup>
+
+---
+
+## Agregar producto al carrito
+
+Agrega un producto al carrito del usuario autenticado. Si el producto ya existe en el carrito, **suma** la cantidad indicada a la existente en lugar de reemplazarla. Devuelve el carrito actualizado con todos sus ítems y productos.
+
+```http
+POST /api/cart
+```
+
+### Parámetros del cuerpo
+
+<ParamField body="product_id" type="integer" required>
+  ID del producto que deseas agregar. Debe existir en la tabla `products`.
+</ParamField>
+
+<ParamField body="quantity" type="integer">
+  Cantidad de unidades a agregar. Valor mínimo: `1`. Si se omite, el valor por defecto es `1`.
+</ParamField>
+
+<CodeGroup>
+
+```bash Agregar 1 unidad (por defecto)
+curl -X POST "https://tusitio.com/api/cart" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210" \
+  -d '{
+    "product_id": 7
+  }'
+```
+
+```bash Agregar 3 unidades
+curl -X POST "https://tusitio.com/api/cart" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210" \
+  -d '{
+    "product_id": 7,
+    "quantity": 3
+  }'
+```
+
+```json Respuesta 200 OK
+{
+  "id": 18,
+  "user_id": 42,
+  "created_at": "2025-01-15T10:30:00.000000Z",
+  "updated_at": "2025-01-15T12:10:00.000000Z",
+  "items": [
+    {
+      "id": 55,
+      "cart_id": 18,
+      "product_id": 7,
+      "quantity": 5,
+      "selected_options": null,
+      "created_at": "2025-01-15T11:45:00.000000Z",
+      "updated_at": "2025-01-15T12:10:00.000000Z",
+      "product": {
+        "id": 7,
+        "merchant_id": 3,
+        "name": "Camiseta Artesanal Bordada",
+        "slug": "camiseta-artesanal-bordada",
+        "price": "35000.00",
+        "stock": 50,
+        "category": "ropa",
+        "image": "products/camiseta-andina.jpg",
+        "available_options": ["talla-s", "talla-m", "talla-l"],
+        "images": ["products/camiseta-andina-front.jpg"],
+        "is_active": true,
+        "specifications": null,
+        "created_at": "2025-01-10T08:00:00.000000Z",
+        "updated_at": "2025-01-12T14:20:00.000000Z"
+      }
+    }
+  ]
+}
+```
+
+</CodeGroup>
+
+<Tip>
+  Cuando el usuario agrega el mismo producto varias veces, la cantidad se acumula. Por ejemplo, si el carrito ya tiene 2 unidades del producto `7` y envías `"quantity": 3`, el carrito quedará con `5` unidades.
+</Tip>
+
+---
+
+## Eliminar ítem del carrito
+
+Elimina un ítem específico del carrito por su identificador de ítem (`CartItem.id`). Si el ítem no pertenece al usuario autenticado, la API responde con `403 Forbidden`.
+
+```http
+DELETE /api/cart/{item}
+```
+
+### Parámetro de ruta
+
+<ParamField path="item" type="integer" required>
+  ID del ítem (`CartItem`) que deseas eliminar. Este valor corresponde al campo `id` dentro del arreglo `items` de la respuesta del carrito.
+</ParamField>
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X DELETE "https://tusitio.com/api/cart/55" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210"
+```
+
+```json Respuesta 200 OK
+{
+  "message": "Eliminado."
+}
+```
+
+```json Respuesta 403 Forbidden
+{
+  "message": "This action is unauthorized."
+}
+```
+
+</CodeGroup>
+
+<Note>
+  El ID que debes usar en `DELETE /api/cart/{item}` es el `id` del objeto dentro del arreglo `items`, **no** el `product_id`. Consulta primero `GET /api/cart` para obtener los IDs correctos de los ítems.
+</Note>

@@ -1,0 +1,64 @@
+---
+title: "Panel del analista: métricas globales de FusaShop"
+sidebarTitle: "Panel Analista"
+description: "Supervisa la actividad de FusaShop desde el dashboard del analista: usuarios, ventas, comerciantes activos y accesos rápidos a la gestión de la plataforma."
+---
+
+El panel del analista es la pantalla principal para quienes administran FusaShop. Desde `/admin/dashboard` obtienes una vista consolidada del estado de la plataforma: cuántos usuarios están registrados, cuánto se vendió en el periodo, qué comerciantes están activos y cuántos pedidos se procesaron. También sirve como punto de partida para gestionar usuarios, KYC, reportes y banners.
+
+## Métricas globales
+
+En el encabezado verás las tarjetas de indicadores clave:
+
+- **Usuarios totales**: cantidad de cuentas registradas por rol (clientes, comerciantes, analistas).
+- **Ventas del periodo**: suma facturada en el rango seleccionado, en pesos colombianos.
+- **Comerciantes activos**: MiPymes con KYC aprobado y productos publicados.
+- **Pedidos**: totales por estado (pendientes, en preparación, enviados, entregados, cancelados).
+
+<Tip>
+  Cambia el rango de fechas del panel para comparar periodos, por ejemplo la semana actual contra la anterior, y detectar tendencias en la plataforma.
+</Tip>
+
+## Accesos rápidos
+
+<CardGroup cols={2}>
+  <Card title="Gestión de usuarios" icon="users" href="/manual/admin/gestion-usuarios">
+    Administra cuentas, roles y bloqueos.
+  </Card>
+
+  <Card title="Aprobación KYC" icon="id-card" href="/manual/admin/aprobacion-kyc">
+    Revisa documentos RUT de comerciantes.
+  </Card>
+
+  <Card title="Reportes" icon="chart-line" href="/manual/admin/reportes">
+    Ventas, pagos, reseñas y análisis ML.
+  </Card>
+
+  <Card title="Banners globales" icon="rectangle-ad" href="/manual/admin/banners-globales">
+    Publicidad de la home y solicitudes de comerciantes.
+  </Card>
+</CardGroup>
+
+## Herramientas de moderación
+
+Además de las métricas, el panel te da acceso rápido a las áreas de moderación de la plataforma:
+
+- **PQRS pendientes**: consulta y responde tickets en `/admin/pqrs`.
+- **Solicitudes de banners**: revisa las propuestas de comerciantes en `/admin/banners`.
+- **Reseñas reportadas**: gestiona calificaciones señaladas por usuarios en `/admin/reviews-report`.
+
+<Info>
+  Todos los cambios que realizas como analista quedan registrados y notifican al usuario afectado (aprobación de KYC, bloqueo de cuenta, aprobación de banner, respuesta a PQRS).
+</Info>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Reportes" icon="file-chart-column" href="/manual/admin/reportes">
+    Consulta reportes imprimibles y análisis.
+  </Card>
+
+  <Card title="Gestión de usuarios" icon="users-gear" href="/manual/admin/gestion-usuarios">
+    Modera cuentas y roles.
+  </Card>
+</CardGroup>

@@ -1,0 +1,251 @@
+---
+title: "Módulo de pagos con PayU: flujo, webhooks y estados"
+sidebarTitle: "Pagos"
+description: "Integración completa de PayU en FusaShop: checkout, redirección de respuesta, webhook server-to-server, estados de orden y máquina de estados de pago."
+---
+
+FusaShop procesa los pagos a través de **PayU Latam**, la pasarela de pagos más utilizada en Colombia. El flujo combina una redirección al checkout de PayU (lado del cliente) con una confirmación server-to-server vía webhook para garantizar la integridad del pago aunque el usuario cierre el navegador antes de volver. Toda la lógica está implementada en `PaymentController` y en el servicio `PayUService`.
+
+## Visión general de la integración
+
+<CardGroup cols={2}>
+  <Card title="Checkout de PayU" icon="credit-card" href="/integraciones/payu">
+    El consumidor es redirigido al formulario de pago de PayU con parámetros firmados. PayU procesa la transacción y redirige de vuelta a `GET /payment/response`.
+  </Card>
+  <Card title="Webhook server-to-server" icon="webhook" href="/modulos/pagos">
+    PayU envía una confirmación `POST /payment/webhook` directamente al servidor, independientemente de la acción del usuario. Aquí se actualiza el estado final de la orden.
+  </Card>
+</CardGroup>
+
+---
+
+## Flujo de checkout
+
+El proceso de pago comienza cuando el consumidor confirma su carrito en `POST /shop/checkout`.
+
+<Steps>
+  <Step title="El consumidor confirma el pedido">
+    El método `checkoutProcess` del `ConsumerController` valida la dirección de envío y el método de pago (`card`, `transfer` o `cash`). Se crea la orden con `status = 'pending'` y `payment_status = 'paid'` (el estado final se confirma vía webhook).
+  </Step>
+  <Step title="Generación de parámetros PayU">
+    `PayUService::getCheckoutParams($order)` construye el array de parámetros requeridos por PayU, incluyendo la referencia única `ORDER-{id}-{timestamp}` y la firma MD5.
+  </Step>
+  <Step title="Redirección al formulario de PayU">
+    El navegador del consumidor es enviado al checkout de PayU (sandbox o producción según la variable `test`).
+  </Step>
+  <Step title="PayU procesa el pago">
+    El consumidor ingresa sus datos de pago directamente en la plataforma de PayU, sin que FusaShop maneje información de tarjetas.
+  </Step>
+  <Step title="Redirección de respuesta (frontend)">
+    PayU redirige al consumidor a `GET /payment/response` con el parámetro `transactionState` y `referenceCode`.
+  </Step>
+  <Step title="Confirmación webhook (backend)">
+    En paralelo, PayU envía `POST /payment/webhook` al servidor con el resultado definitivo. Este es el paso que actualiza la base de datos.
+  </Step>
+</Steps>
+
+---
+
+## Firma de transacción
+
+`PayUService` genera la firma MD5 requerida por PayU para validar la integridad de la solicitud:
+
+```php title="PayUService.php — generateSignature()"
+public function generateSignature($reference, $amount, $currency)
+{
+    // Formato: ApiKey~merchantId~referenceCode~amount~currency
+    $amountFormatted = number_format($amount, 0, '.', '');
+    $signatureString = "{$this->apiKey}~{$this->merchantId}~{$reference}~{$amountFormatted}~{$currency}";
+    return md5($signatureString);
+}
+```
+
+La referencia de la orden sigue el formato `ORDER-{id}-{timestamp}`, por ejemplo `ORDER-142-1717000000`. Este formato es crucial para que el webhook pueda recuperar el ID de la orden:
+
+```php title="PaymentController.php — webhook() — extracción del ID"
+// Extraer ID de pedido de la referencia (ORDER-ID-TIME)
+$parts = explode('-', $reference);
+if (isset($parts[1])) {
+    $orderId = $parts[1];
+    $order = Order::find($orderId);
+    // ...
+}
+```
+
+---
+
+## Endpoint de respuesta (frontend)
+
+**`GET /payment/response`** — PayU redirige al consumidor aquí al terminar la transacción.
+
+<CodeGroup>
+```php title="PaymentController.php — response()"
+public function response(Request $request)
+{
+    // transactionState: 4 = Aprobado, 6 = Rechazado, 104 = Error, 7 = Pendiente
+    $state     = $request->get('transactionState');
+    $reference = $request->get('referenceCode');
+
+    $status  = 'pending';
+    $message = 'Tu pago está siendo procesado.';
+
+    if ($state == 4) {
+        $status  = 'success';
+        $message = '¡Pago aprobado con éxito! Gracias por tu compra.';
+    } elseif ($state == 6) {
+        $status  = 'error';
+        $message = 'El pago fue rechazado. Intenta con otro medio.';
+    }
+
+    return view('payment.result', compact('status', 'message', 'reference'));
+}
+```
+</CodeGroup>
+
+<Info>
+  Este endpoint **solo muestra un mensaje al usuario**. No actualiza la base de datos. La actualización real se realiza en el webhook para garantizar consistencia incluso si el usuario cierra el navegador.
+</Info>
+
+### Códigos de `transactionState`
+
+| Código | Significado | Estado mostrado |
+|--------|-------------|-----------------|
+| `4` | Aprobado | `success` |
+| `6` | Rechazado | `error` |
+| `7` | Pendiente | `pending` |
+| `104` | Error interno | — (no manejado en `response`, solo en webhook) |
+
+---
+
+## Endpoint de webhook (backend)
+
+**`POST /payment/webhook`** — PayU lo llama directamente desde sus servidores (server-to-server).
+
+<CodeGroup>
+```php title="PaymentController.php — webhook()"
+public function webhook(Request $request)
+{
+    Log::info('PayU Webhook received', $request->all());
+
+    $reference = $request->post('reference_sale');
+    $state     = $request->post('state_pol'); // 4 = Aprobado
+    $value     = $request->post('value');
+
+    $parts = explode('-', $reference);
+    if (isset($parts[1])) {
+        $orderId = $parts[1];
+        $order   = Order::find($orderId);
+
+        if ($order) {
+            if ($state == 4) {
+                $order->update(['payment_status' => 'paid', 'status' => 'processing']);
+
+                // Enviar recibo al consumidor
+                try {
+                    Mail::to($order->user->email)
+                        ->send(new OrderReceipt($order->load('items.product', 'user')));
+                } catch (\Exception $e) {
+                    Log::error('Error sending receipt email: ' . $e->getMessage());
+                }
+            } elseif ($state == 6 || $state == 5) {
+                $order->update(['payment_status' => 'failed']);
+            }
+        }
+    }
+
+    return response('OK', 200);
+}
+```
+</CodeGroup>
+
+<Warning>
+  El webhook debe responder con HTTP `200 OK` para que PayU no reintente la notificación. Si el servidor retorna cualquier otro código, PayU repetirá la llamada hasta cinco veces.
+</Warning>
+
+### Lógica de estados en el webhook
+
+| `state_pol` | Acción sobre la orden |
+|-------------|----------------------|
+| `4` (Aprobado) | `payment_status → paid`, `status → processing`, envía `OrderReceipt` por email |
+| `5` (Expirado) | `payment_status → failed` |
+| `6` (Rechazado) | `payment_status → failed` |
+
+---
+
+## Máquina de estados de la orden
+
+El modelo `Order` define dos campos de estado independientes: `status` (estado logístico) y `payment_status` (estado de pago).
+
+### Estado logístico (`status`)
+
+```text
+pending → processing → shipped → delivered
+                                       ↑
+                  cancelled ←──────────┘ (desde cualquier estado previo a delivered)
+```
+
+<Accordion title="Descripción de cada estado logístico">
+
+| Estado | Descripción |
+|--------|-------------|
+| `pending` | La orden acaba de crearse, esperando confirmación de pago |
+| `processing` | Pago confirmado, el comerciante está preparando el envío |
+| `shipped` | El pedido fue entregado al servicio de mensajería |
+| `delivered` | El consumidor recibió el pedido |
+| `cancelled` | La orden fue cancelada antes de entregarse |
+
+</Accordion>
+
+### Estado de pago (`payment_status`)
+
+```text
+pending → paid
+       → failed
+```
+
+| Estado | Descripción |
+|--------|-------------|
+| `pending` | Pago iniciado, aún sin confirmar (estado inicial) |
+| `paid` | PayU confirmó el pago exitosamente (`state_pol = 4`) |
+| `failed` | Pago rechazado o expirado (`state_pol = 5` o `6`) |
+
+<Note>
+  Los estados `status` y `payment_status` se gestionan por separado. Una orden puede tener `payment_status = paid` y `status = processing` simultáneamente. El comerciante es responsable de avanzar el `status` logístico desde su panel.
+</Note>
+
+---
+
+## Configuración del servicio PayU
+
+`PayUService` lee su configuración desde `config/services.php` (que a su vez toma valores de `.env`):
+
+<CodeGroup>
+```php title="PayUService.php — __construct()"
+$this->merchantId = config('services.payu.merchant_id', '508029'); // Sandbox por defecto
+$this->apiKey     = config('services.payu.api_key', '4Vj8eK4r98P846E');
+$this->accountId  = config('services.payu.account_id', '512321');
+$this->test       = config('services.payu.test', 1);
+$this->url        = $this->test
+    ? 'https://sandbox.checkout.payulatam.com/checkout/webcheckout.php'
+    : 'https://checkout.payulatam.com/checkout/webcheckout.php';
+```
+
+```env title=".env — variables de PayU"
+PAYU_MERCHANT_ID=tu_merchant_id
+PAYU_API_KEY=tu_api_key
+PAYU_ACCOUNT_ID=tu_account_id
+PAYU_TEST=0
+```
+</CodeGroup>
+
+<Tip>
+  Para pruebas en desarrollo, deja `PAYU_TEST=1`. PayU sandbox tiene tarjetas de prueba disponibles en su documentación oficial. Cambia a `PAYU_TEST=0` solo en producción con credenciales reales.
+</Tip>
+
+---
+
+## Correo de recibo (`OrderReceipt`)
+
+Cuando el webhook confirma un pago exitoso, FusaShop envía automáticamente un correo al consumidor usando la clase mailable `App\Mail\OrderReceipt`. El correo incluye el detalle de los ítems y el total del pedido, cargados con `$order->load('items.product', 'user')`.
+
+Los errores en el envío del correo se registran en el log pero **no interrumpen** el proceso de actualización de la orden, garantizando la consistencia del estado en base de datos.

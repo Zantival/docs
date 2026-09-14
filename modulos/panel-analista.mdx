@@ -1,0 +1,333 @@
+---
+title: "Panel de analista: gestión de usuarios, KYC y reportes"
+sidebarTitle: "Panel Analista"
+description: "Guía completa del panel de analista en FusaShop: CRUD de usuarios, revisión KYC, banners globales, reportes de ventas y análisis ML de comerciantes."
+---
+
+El panel de analista es el centro de control de FusaShop. Desde aquí puedes administrar usuarios de todos los roles, aprobar o rechazar documentos KYC de comerciantes, gestionar banners publicitarios globales, consultar métricas de ventas en tiempo real y ejecutar el motor de análisis ML que clasifica el desempeño de cada MiPyme. Todas las rutas están protegidas por el middleware `role:analyst` y se sirven bajo el prefijo `/admin`.
+
+## Resumen de rutas
+
+| Método | Ruta | Nombre | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/admin/dashboard` | `analyst.dashboard` | Panel principal con KPIs |
+| `GET` | `/admin/users` | `analyst.users` | Listado de usuarios |
+| `GET` | `/admin/users/create` | `analyst.users.create` | Formulario de creación |
+| `POST` | `/admin/users` | `analyst.users.store` | Crear usuario |
+| `GET` | `/admin/users/{user}/edit` | `analyst.users.edit` | Formulario de edición |
+| `PUT` | `/admin/users/{user}` | `analyst.users.update` | Actualizar usuario |
+| `DELETE` | `/admin/users/{user}` | `analyst.users.delete` | Eliminar usuario |
+| `PATCH` | `/admin/users/{user}/toggle-block` | `analyst.users.toggle-block` | Bloquear / desbloquear |
+| `GET` | `/admin/users/{user}/rut` | `analyst.users.rut` | Ver archivo RUT |
+| `POST` | `/admin/users/{user}/kyc` | `analyst.users.kyc` | Aprobar / rechazar KYC |
+| `GET` | `/admin/banners` | `analyst.banners` | Gestión de banners |
+| `POST` | `/admin/banners` | `analyst.banners.store` | Crear banner |
+| `PATCH` | `/admin/banners/{banner}/toggle` | `analyst.banners.toggle` | Activar / desactivar |
+| `DELETE` | `/admin/banners/{banner}` | `analyst.banners.delete` | Eliminar banner |
+| `GET` | `/admin/banner-requests/{id}` | `analyst.banner-requests.show` | Ver solicitud de banner |
+| `POST` | `/admin/banner-requests/{id}/approve` | `analyst.banner-requests.approve` | Aprobar solicitud |
+| `GET` | `/admin/reviews-report` | `analyst.reviews-report` | Reporte de reseñas ML |
+| `POST` | `/admin/run-ml` | `analyst.run-ml` | Ejecutar análisis ML |
+| `GET` | `/admin/sales-report-print` | `analyst.sales-report.print` | Imprimir reporte de ventas |
+| `GET` | `/admin/orders` | `analyst.orders` | Ver todos los pedidos |
+| `GET` | `/admin/payments` | `analyst.payments` | Pagos y comerciantes |
+| `GET` | `/admin/pqrs` | `analyst.pqrs.index` | Gestión de PQRS |
+
+---
+
+## Gestión de usuarios
+
+El controlador `AnalystController` expone un CRUD completo para los usuarios de la plataforma. Puedes filtrar por `role` (`consumer`, `merchant`, `analyst`) y por `name` o `email` desde la misma vista.
+
+### Crear usuario
+
+<Steps>
+  <Step title="Accede al formulario">
+    Navega a `GET /admin/users/create`. El formulario solicita nombre, correo, contraseña, rol y teléfono opcional.
+  </Step>
+  <Step title="Envía el formulario">
+    El método `userStore` valida los datos y crea el usuario con la contraseña cifrada mediante `Hash::make`.
+  </Step>
+  <Step title="Verificación">
+    Recibirás una confirmación `'Usuario creado exitosamente.'` y serás redirigido al listado.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php title="AnalystController.php — userStore()" {6-7}
+$data = $request->validate([
+    'name'     => 'required|string|max:255',
+    'email'    => 'required|email|unique:users',
+    'password' => ['required', Password::min(8)],
+    'role'     => 'required|in:consumer,merchant,analyst',
+    'phone'    => 'nullable|string|max:20',
+]);
+User::create([
+    'name'     => strip_tags($data['name']),
+    'email'    => $data['email'],
+    'password' => Hash::make($data['password']),
+    'role'     => $data['role'],
+    'phone'    => $data['phone'] ?? null,
+]);
+```
+</CodeGroup>
+
+### Bloquear y desbloquear usuarios
+
+El método `userToggleBlock` invierte el campo `is_blocked` del usuario. El propio analista autenticado no puede bloquearse a sí mismo.
+
+<CodeGroup>
+```php title="AnalystController.php — userToggleBlock()"
+public function userToggleBlock(User $user)
+{
+    if ($user->id === auth()->id()) {
+        return back()->with('error', 'No puedes bloquearte a ti mismo.');
+    }
+    $user->update(['is_blocked' => !$user->is_blocked]);
+    $msg = $user->is_blocked ? 'bloqueado' : 'desbloqueado';
+    return back()->with('success', "Usuario {$msg} exitosamente.");
+}
+```
+</CodeGroup>
+
+<Warning>
+  No es posible eliminar la propia cuenta del analista autenticado. El método `userDelete` verifica `$user->id === auth()->id()` antes de ejecutar el borrado.
+</Warning>
+
+---
+
+## Gestión de KYC
+
+Los comerciantes que se registran en FusaShop deben subir su RUT para activar su tienda. Tú, como analista, revisas ese documento y apruebas o rechazas la solicitud.
+
+### Ver el archivo RUT
+
+Accede a `GET /admin/users/{user}/rut`. El método `userRut` busca el archivo en el almacenamiento privado y lo devuelve como respuesta de archivo. Si el archivo no existe en ninguna de las rutas esperadas, retorna un `404`.
+
+### Aprobar o rechazar KYC
+
+<Steps>
+  <Step title="Localiza al comerciante">
+    En `/admin/users`, filtra por `role=merchant` y abre el perfil del comerciante pendiente de revisión.
+  </Step>
+  <Step title="Descarga y revisa el RUT">
+    Haz clic en "Ver RUT" para abrir el archivo directamente desde el servidor.
+  </Step>
+  <Step title="Emite tu decisión">
+    Envía el formulario con `kyc_status` (`approved` o `rejected`) y un campo `kyc_notes` opcional con observaciones (máximo 1 000 caracteres).
+  </Step>
+  <Step title="Notificación automática">
+    El sistema llama a `$user->notify(new KycDecisionNotification($profile))`, que envía la decisión por correo y la guarda en la base de datos.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php title="AnalystController.php — updateKyc()"
+$request->validate([
+    'kyc_status' => 'required|in:approved,rejected',
+    'kyc_notes'  => 'nullable|string|max:1000',
+]);
+
+$profile = $user->companyProfile;
+if ($profile) {
+    $profile->update([
+        'kyc_status' => $request->kyc_status,
+        'kyc_notes'  => $request->kyc_notes,
+    ]);
+    $user->notify(new \App\Notifications\KycDecisionNotification($profile));
+}
+```
+</CodeGroup>
+
+<Info>
+  Los estados válidos de KYC son `pending` (inicial), `approved` (activa la tienda) y `rejected` (bloquea el acceso al dashboard del comerciante).
+</Info>
+
+---
+
+## Banners globales
+
+FusaShop permite mostrar banners publicitarios en toda la tienda. Existen dos flujos: la creación directa por parte del analista y la aprobación de una solicitud enviada por un comerciante.
+
+<CardGroup cols={2}>
+  <Card title="Crear banner directo" icon="image" href="/modulos/panel-analista">
+    Sube una imagen (JPG, PNG, WebP, MP4, WebM, MOV — máx. 10 MB) con título, URL de destino y orden de visualización desde `POST /admin/banners`.
+  </Card>
+  <Card title="Aprobar solicitud de comerciante" icon="check" href="/modulos/comerciantes">
+    Revisa las solicitudes pendientes en `GET /admin/banner-requests/{id}` y apruébalas con `POST /admin/banner-requests/{id}/approve`. Al aprobar, se crea automáticamente un `GlobalBanner`.
+  </Card>
+</CardGroup>
+
+### Aprobar una solicitud de banner
+
+<CodeGroup>
+```php title="AnalystController.php — bannerRequestApprove()"
+$requestInfo->update(['status' => 'approved']);
+
+// Determina el destino del enlace
+$linkUrl = route('consumer.merchant.profile', $requestInfo->user_id);
+if ($request->input('link_type') === 'custom' && $request->filled('custom_link_url')) {
+    $linkUrl = $request->custom_link_url;
+}
+
+GlobalBanner::create([
+    'title'      => 'Banner Patrocinado - ' . ($requestInfo->user->companyProfile->company_name ?? 'Comerciante'),
+    'image_path' => $requestInfo->image_path,
+    'link_url'   => $linkUrl,
+    'is_active'  => true,
+    'sort_order' => GlobalBanner::max('sort_order') + 1,
+]);
+```
+</CodeGroup>
+
+### Activar y desactivar banners
+
+Usa `PATCH /admin/banners/{banner}/toggle` para cambiar el estado `is_active`. El método `bannerToggle` invierte el valor actual:
+
+```php title="AnalystController.php — bannerToggle()"
+$banner->update(['is_active' => !$banner->is_active]);
+```
+
+---
+
+## Datos analíticos
+
+El dashboard del analista consolida los principales indicadores de la plataforma a través del método `dashboard()`.
+
+<CardGroup cols={2}>
+  <Card title="Ventas mensuales" icon="chart-line" href="/modulos/panel-analista">
+    Órdenes con `payment_status = paid`, agrupadas por mes del año en curso.
+  </Card>
+  <Card title="Ventas por empresa" icon="building" href="/modulos/comerciantes">
+    Top 6 de empresas con mayor facturación, calculado sobre `order_items × products × company_profiles`.
+  </Card>
+  <Card title="Top 5 productos" icon="trophy" href="/modulos/consumidores">
+    Los cinco productos más vendidos por unidades, calculado sobre `SUM(quantity)`.
+  </Card>
+  <Card title="Pedidos por estado" icon="list-check" href="/modulos/panel-analista">
+    Conteo de pedidos agrupado por `status` (pending, processing, shipped, delivered, cancelled).
+  </Card>
+</CardGroup>
+
+El endpoint `GET /api/analytics` (protegido por Sanctum) expone los datos de ventas mensuales e ingresos por categoría en formato JSON para integraciones externas:
+
+```php title="AnalystController.php — analyticsData()"
+return response()->json([
+    'monthly_sales'    => Order::where('payment_status','paid')
+        ->select(DB::raw('MONTH(created_at) as month'), DB::raw('SUM(total) as total'))
+        ->whereYear('created_at', date('Y'))->groupBy('month')->orderBy('month')->get(),
+    'category_revenue' => OrderItem::join('products','products.id','=','order_items.product_id')
+        ->select('products.category', DB::raw('SUM(order_items.quantity * order_items.price) as revenue'))
+        ->groupBy('products.category')->get(),
+]);
+```
+
+---
+
+## Reporte de reseñas y análisis de sentimiento
+
+El método `reviewsReport()` genera un informe por comerciante que combina métricas de reseñas con un modelo de clasificación de rendimiento.
+
+### Campos del reporte
+
+<Accordion title="Métricas calculadas por comerciante">
+
+| Campo | Descripción |
+|-------|-------------|
+| `avg_rating` | Promedio de estrellas (1-5) de todos los productos del comerciante |
+| `total_reviews` | Número total de reseñas recibidas |
+| `total_sales` | Facturación total en COP |
+| `sentiment` | `Positivo` (≥4.0), `Neutral` (3.0-3.9), `Negativo` (menos de 3.0) |
+| `positive` / `neutral` / `negative` | Conteo de reseñas con rating ≥4, =3, ≤2 respectivamente |
+| `stars` | Distribución exacta de estrellas (1 a 5) |
+| `best_product` | Producto con mayor promedio de rating |
+| `worst_product` | Producto con menor promedio de rating |
+| `tier` | Clasificación ML: `Excelente`, `Aceptable` o `Peligro` |
+| `score` | Puntuación compuesta (0-100) |
+
+</Accordion>
+
+### Cálculo del tier ML (integrado en PHP)
+
+El controlador calcula el tier directamente como simulación del modelo:
+
+```php title="AnalystController.php — reviewsReport() — cálculo de tier"
+// score = 60% rating normalizado + 40% ventas normalizadas
+$score = ($avgRating / 5) * 0.6 + min(1, $totalSales / 10000000) * 0.4;
+$tier  = $score >= 0.7 ? 'Excelente' : ($score >= 0.4 ? 'Aceptable' : 'Peligro');
+```
+
+---
+
+## Motor ML externo (Python)
+
+Para ejecutar el análisis ML completo sobre todos los comerciantes, usa la acción `POST /admin/run-ml`. El controlador construye un payload JSON con `merchant_id`, `company_name`, `total_sales` y `avg_rating` para cada comerciante, y lo pasa por `stdin` al script `python/ml_analyzer.py`.
+
+<Steps>
+  <Step title="El controlador recopila datos">
+    Itera sobre todos los `CompanyProfile` con sus productos y reseñas para construir el payload.
+  </Step>
+  <Step title="Invoca el script Python">
+    Usa `Symfony\Component\Process\Process` para ejecutar `python3 python/ml_analyzer.py` con el JSON como entrada estándar.
+  </Step>
+  <Step title="Procesa la respuesta">
+    Si el proceso termina exitosamente, el output JSON se almacena en la sesión bajo la clave `ml_results` y se muestra en la vista.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php title="AnalystController.php — runMl()"
+$process = new Process(['python3', $scriptPath]);
+$process->setInput(json_encode($payload));
+$process->run();
+
+if (!$process->isSuccessful()) {
+    return back()->with('error', 'Error en el motor ML: ' . $process->getErrorOutput());
+}
+
+$output = json_decode($process->getOutput(), true);
+session()->flash('ml_results', $output['analytics'] ?? []);
+return back()->with('success', 'Análisis ML completado.');
+```
+
+```python title="python/ml_analyzer.py — classify()"
+def analyze(data):
+    results = []
+    for item in data:
+        ventas = item.get("total_sales", 0)
+        rating = item.get("avg_rating", 0)
+
+        score = (ventas * 0.4) + (rating * 0.6 * 10)
+
+        classification = "Low Performer"
+        if score > 80:
+            classification = "Top Performer"
+        elif score > 40:
+            classification = "Average Performer"
+
+        results.append({
+            "merchant_id":      item.get("merchant_id"),
+            "company_name":     item.get("company_name"),
+            "raw_score":        round(score, 2),
+            "classification":   classification,
+            "anomaly_detected": ventas > 1000 and rating < 2.0,
+        })
+    return {"status": "success", "analytics": results}
+```
+</CodeGroup>
+
+<Note>
+  El script Python debe estar en `base_path('python/ml_analyzer.py')`. Si no existe, el controlador retorna el error `'Script ML no encontrado.'`. Asegúrate de que `python3` esté disponible en el `PATH` del servidor.
+</Note>
+
+---
+
+## Reporte de ventas imprimible
+
+La ruta `GET /admin/sales-report-print` genera una vista dedicada para impresión con las ventas mensuales del año en curso y el ranking de ventas por empresa. Usa `Ctrl+P` (o el botón de la interfaz) para imprimir o exportar a PDF desde el navegador.
+
+---
+
+## Gestión de PQRS desde el panel
+
+El analista también puede revisar y responder todas las solicitudes PQRS desde `GET /admin/pqrs`. Consulta la sección [PQRS](/modulos/pqrs) para el detalle completo del flujo.

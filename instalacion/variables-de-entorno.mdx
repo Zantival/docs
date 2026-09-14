@@ -1,0 +1,269 @@
+---
+title: "Variables de entorno de FusaShop y su configuración"
+sidebarTitle: "Variables de Entorno"
+description: "Referencia completa de todas las variables de entorno que FusaShop usa para configurar la app, base de datos, correo, sesiones y servicios externos."
+---
+
+FusaShop usa un archivo `.env` en la raíz del proyecto para centralizar toda la configuración sensible y dependiente del entorno. El repositorio incluye un `.env.example` con valores por defecto seguros para desarrollo local. Copia ese archivo con `cp .env.example .env` y ajusta los valores antes de ejecutar la aplicación por primera vez.
+
+<Warning>
+  Nunca subas tu archivo `.env` al control de versiones. Contiene credenciales de base de datos, claves secretas y tokens de servicios externos. El `.gitignore` del proyecto ya lo excluye por defecto.
+</Warning>
+
+---
+
+## Aplicación
+
+Estas variables controlan el comportamiento general del framework Laravel y la identidad de la aplicación.
+
+<ParamField path="APP_NAME" type="string" default="FusaShop">
+  Nombre de la aplicación. Se usa en notificaciones por correo, en el campo `MAIL_FROM_NAME` y en la interfaz de usuario.
+</ParamField>
+
+<ParamField path="APP_ENV" type="string" default="local">
+  Entorno de ejecución. Valores posibles: `local`, `staging`, `production`. Afecta la visualización de errores, la caché de configuración y otros comportamientos del framework.
+</ParamField>
+
+<ParamField path="APP_KEY" type="string" default="">
+  Clave secreta de 32 bytes en base64 usada para cifrar cookies, sesiones y datos sensibles. **Genera siempre una clave única** con `php artisan key:generate`. Nunca reutilices claves entre entornos.
+</ParamField>
+
+<ParamField path="APP_DEBUG" type="boolean" default="true">
+  Activa (`true`) o desactiva (`false`) la página de diagnóstico de errores de Laravel. Establece `false` obligatoriamente en producción para no exponer trazas de pila al público.
+</ParamField>
+
+<ParamField path="APP_TIMEZONE" type="string" default="America/Bogota">
+  Zona horaria de PHP usada en fechas y horas a lo largo de la aplicación. FusaShop usa `America/Bogota` por defecto, acorde a su mercado objetivo colombiano.
+</ParamField>
+
+<ParamField path="APP_URL" type="string" default="http://localhost:8000">
+  URL base pública de la aplicación. Laravel la usa para generar enlaces absolutos en correos y redirecciones OAuth. En producción cámbiala por tu dominio real (p.ej. `https://fusashop.com`).
+</ParamField>
+
+<ParamField path="APP_LOCALE" type="string" default="es">
+  Idioma predeterminado de la aplicación. FusaShop está configurado en español (`es`).
+</ParamField>
+
+<ParamField path="APP_FALLBACK_LOCALE" type="string" default="es">
+  Idioma de respaldo cuando una cadena de traducción no existe en `APP_LOCALE`.
+</ParamField>
+
+<ParamField path="APP_FAKER_LOCALE" type="string" default="es_CO">
+  Locale usado por Faker en las factories de prueba. `es_CO` genera nombres, direcciones y teléfonos colombianos realistas.
+</ParamField>
+
+<ParamField path="APP_MAINTENANCE_DRIVER" type="string" default="file">
+  Driver utilizado para gestionar el modo mantenimiento de la aplicación. El valor `file` almacena el estado en disco; compatible con `cache` cuando se usa un driver de caché centralizado.
+</ParamField>
+
+<ParamField path="BCRYPT_ROUNDS" type="integer" default="12">
+  Número de rondas de bcrypt para el hash de contraseñas. El valor `12` es el mínimo recomendado para producción. Reducir este número acelera las pruebas; aumentarlo mejora la seguridad a costa de rendimiento.
+</ParamField>
+
+---
+
+## Base de datos
+
+FusaShop soporta MySQL y PostgreSQL. Estas variables configuran la conexión activa.
+
+<ParamField path="DB_CONNECTION" type="string" default="mysql">
+  Driver de base de datos. Valores soportados: `mysql` (predeterminado), `pgsql`, `sqlite`.
+</ParamField>
+
+<ParamField path="DB_HOST" type="string" default="127.0.0.1">
+  Host del servidor de base de datos. En Docker, usa el nombre del servicio o `host.docker.internal`.
+</ParamField>
+
+<ParamField path="DB_PORT" type="integer" default="3306">
+  Puerto de la base de datos. MySQL usa `3306`; PostgreSQL usa `5432`.
+</ParamField>
+
+<ParamField path="DB_DATABASE" type="string" default="fusashop">
+  Nombre de la base de datos. Crea esta base de datos manualmente antes de ejecutar las migraciones.
+</ParamField>
+
+<ParamField path="DB_USERNAME" type="string" default="root">
+  Usuario de la base de datos con permisos de lectura y escritura sobre `DB_DATABASE`.
+</ParamField>
+
+<ParamField path="DB_PASSWORD" type="string" default="">
+  Contraseña del usuario de base de datos. Deja vacío si usas MySQL local sin contraseña en desarrollo.
+</ParamField>
+
+<Note>
+  Para usar **PostgreSQL**, cambia `DB_CONNECTION=pgsql`, `DB_PORT=5432` y actualiza `DB_HOST`, `DB_DATABASE`, `DB_USERNAME` y `DB_PASSWORD` con los datos de tu servidor PostgreSQL. La configuración del driver está en `config/database.php`.
+</Note>
+
+---
+
+## Sesiones
+
+<ParamField path="SESSION_DRIVER" type="string" default="file">
+  Almacenamiento de sesiones. El `.env.example` usa `file`; opciones disponibles: `database`, `cookie`, `redis`, `array`. Usa `database` en producción con múltiples instancias.
+</ParamField>
+
+<ParamField path="SESSION_LIFETIME" type="integer" default="120">
+  Tiempo de vida de la sesión en minutos. Pasado este tiempo sin actividad, la sesión expira.
+</ParamField>
+
+---
+
+## Caché
+
+<ParamField path="CACHE_STORE" type="string" default="file">
+  Driver de caché. Opciones disponibles: `file`, `database`, `array`, `null`. Para alta concurrencia en producción, configura Redis y usa `redis`.
+</ParamField>
+
+---
+
+## Cola de trabajos
+
+<ParamField path="QUEUE_CONNECTION" type="string" default="sync">
+  Driver de la cola de trabajos. `sync` ejecuta los jobs de forma síncrona (útil en desarrollo). En producción usa `database` o `redis` para procesamiento asíncrono en segundo plano.
+</ParamField>
+
+---
+
+## Sistema de archivos y difusión
+
+<ParamField path="FILESYSTEM_DISK" type="string" default="local">
+  Disco predeterminado para almacenamiento de archivos. Valores: `local` (almacenamiento en servidor), `s3` (Amazon S3 o compatible).
+</ParamField>
+
+<ParamField path="BROADCAST_CONNECTION" type="string" default="log">
+  Driver de difusión de eventos en tiempo real. Usa `log` en desarrollo para registrar eventos sin emitirlos realmente. En producción, configura `pusher` o `reverb`.
+</ParamField>
+
+---
+
+## Correo electrónico
+
+FusaShop usa Resend como proveedor principal en producción, con soporte adicional para Mailgun. En desarrollo local, `MAIL_MAILER=log` escribe los correos en `storage/logs/laravel.log` en lugar de enviarlos.
+
+<ParamField path="MAIL_MAILER" type="string" default="log">
+  Transportador de correo. Valores soportados: `log` (desarrollo), `resend`, `mailgun`, `smtp`, `sendmail`.
+</ParamField>
+
+<ParamField path="MAIL_FROM_ADDRESS" type="string" default="hello@fusashop.com">
+  Dirección de correo del remitente en todos los mensajes enviados por la aplicación.
+</ParamField>
+
+<ParamField path="MAIL_FROM_NAME" type="string" default="${APP_NAME}">
+  Nombre del remitente. Por defecto toma el valor de `APP_NAME`.
+</ParamField>
+
+Para usar **Resend** (paquete `resend/resend-laravel` incluido), agrega:
+
+```bash title="Variables para Resend"
+MAIL_MAILER=resend
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+```
+
+Para usar **Mailgun** (paquete `symfony/mailgun-mailer` incluido), agrega:
+
+```bash title="Variables para Mailgun"
+MAIL_MAILER=mailgun
+MAILGUN_DOMAIN=mg.tudominio.com
+MAILGUN_SECRET=key-xxxxxxxxxxxxxxxx
+MAILGUN_ENDPOINT=api.mailgun.net
+```
+
+---
+
+## Logging
+
+<ParamField path="LOG_CHANNEL" type="string" default="stack">
+  Canal de logging. `stack` permite combinar múltiples canales.
+</ParamField>
+
+<ParamField path="LOG_STACK" type="string" default="single">
+  Canales que forman el stack. `single` escribe todo en `storage/logs/laravel.log`.
+</ParamField>
+
+<ParamField path="LOG_LEVEL" type="string" default="debug">
+  Nivel mínimo de log. Valores (de menor a mayor severidad): `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency`. En producción usa `warning` o superior.
+</ParamField>
+
+---
+
+## Autenticación social (OAuth)
+
+FusaShop usa **Laravel Socialite ^5.26** para autenticación con Google y Facebook. Estas variables **no están en `.env.example`** y debes añadirlas manualmente. Los valores provienen de la consola de desarrolladores de cada proveedor (valores definidos en `config/services.php`).
+
+```bash title="Variables OAuth — añadir manualmente al .env"
+# Google OAuth
+GOOGLE_CLIENT_ID=tu_google_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=tu_google_client_secret
+
+# Facebook OAuth
+FACEBOOK_CLIENT_ID=tu_facebook_app_id
+FACEBOOK_CLIENT_SECRET=tu_facebook_app_secret
+```
+
+<Info>
+  La URL de callback se construye automáticamente a partir de `APP_URL`:
+  - Google: `{APP_URL}/auth/google/callback`
+  - Facebook: `{APP_URL}/auth/facebook/callback`
+
+  Registra exactamente estas URLs en las consolas de Google Cloud y Meta for Developers.
+</Info>
+
+---
+
+## Redis (opcional)
+
+Si usas Redis para caché, sesiones o colas, agrega estas variables:
+
+```bash title="Variables Redis — añadir manualmente al .env"
+REDIS_CLIENT=phpredis
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_CACHE_DB=1
+```
+
+---
+
+## Referencia completa del `.env.example`
+
+```bash title=".env.example"
+APP_NAME=FusaShop
+APP_ENV=local
+APP_KEY=
+APP_DEBUG=true
+APP_TIMEZONE=America/Bogota
+APP_URL=http://localhost:8000
+
+APP_LOCALE=es
+APP_FALLBACK_LOCALE=es
+APP_FAKER_LOCALE=es_CO
+
+APP_MAINTENANCE_DRIVER=file
+
+BCRYPT_ROUNDS=12
+
+LOG_CHANNEL=stack
+LOG_STACK=single
+LOG_LEVEL=debug
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=fusashop
+DB_USERNAME=root
+DB_PASSWORD=
+
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+
+BROADCAST_CONNECTION=log
+FILESYSTEM_DISK=local
+QUEUE_CONNECTION=sync
+
+CACHE_STORE=file
+
+MAIL_MAILER=log
+MAIL_FROM_ADDRESS="hello@fusashop.com"
+MAIL_FROM_NAME="${APP_NAME}"
+```

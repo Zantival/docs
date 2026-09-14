@@ -1,0 +1,71 @@
+---
+title: "Atiende y procesa los pedidos de tus clientes"
+sidebarTitle: "Pedidos"
+description: "Revisa los pedidos entrantes de tu tienda FusaShop, actualiza su estado en cada etapa y comunícate con clientes para brindar el mejor servicio."
+---
+
+La sección de pedidos es donde el trabajo diario de tu MiPyme se hace visible. En `/merchant/orders` verás cada compra que recibes, sus productos, los datos del cliente y podrás avanzar el pedido por sus distintas etapas hasta la entrega. Esta página explica el flujo completo.
+
+## Procesar un pedido
+
+<Steps>
+  <Step title="Abre pedidos">
+    Ve a `/merchant/orders` desde el panel del comerciante.
+  </Step>
+  <Step title="Revisa los nuevos pedidos">
+    Los pedidos aparecen ordenados por fecha, más recientes primero. Los que requieren atención están destacados.
+  </Step>
+  <Step title="Abre el detalle">
+    Haz clic en un pedido para ver los productos incluidos, la dirección de envío y los datos de contacto del cliente.
+  </Step>
+  <Step title="Actualiza el estado">
+    Cambia el estado desde el menú desplegable a medida que avances: pendiente, en preparación, enviado o entregado. El cliente recibirá una notificación automática.
+  </Step>
+  <Step title="Contacta al cliente si es necesario">
+    Usa el [chat](/manual/soporte/chat) integrado si necesitas coordinar detalles del envío o resolver dudas.
+  </Step>
+</Steps>
+
+<Tip>
+  Mantén el estado del pedido actualizado en tiempo real. Los clientes valoran ver el progreso de su compra y esto reduce consultas repetitivas por chat o PQRS.
+</Tip>
+
+## Estados del pedido
+
+<AccordionGroup>
+  <Accordion title="Pendiente">
+    Estado inicial. El pago está aprobado y el pedido espera ser preparado.
+  </Accordion>
+
+  <Accordion title="En preparación">
+    Estás alistando el pedido: separando productos, empacando y preparando el envío.
+  </Accordion>
+
+  <Accordion title="Enviado">
+    Entregaste el paquete al transportador. Si tienes número de guía, agrégalo al pedido.
+  </Accordion>
+
+  <Accordion title="Entregado">
+    El pedido llegó al cliente. Este estado habilita que el cliente deje una reseña.
+  </Accordion>
+
+  <Accordion title="Cancelado">
+    Se anuló el pedido, ya sea por acuerdo con el cliente o por imposibilidad de cumplirlo. Si aplicaba reembolso, se gestiona por PayU.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  Cancelar pedidos con frecuencia afecta tu reputación y las reseñas de tu tienda. Usa la cancelación solo cuando sea inevitable y comunícalo al cliente por chat.
+</Warning>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Reseñas" icon="star" href="/manual/comerciante/panel">
+    Responde las calificaciones recibidas desde `/merchant/reviews`.
+  </Card>
+
+  <Card title="Finanzas" icon="chart-line" href="/manual/comerciante/finanzas">
+    Consulta ingresos por los pedidos completados.
+  </Card>
+</CardGroup>

@@ -1,0 +1,70 @@
+---
+title: "Explora el catálogo de productos y comerciantes"
+sidebarTitle: "Explorar Catálogo"
+description: "Navega el catálogo de FusaShop, filtra por categorías, busca productos, revisa fichas detalladas y descubre las MiPymes que venden en la plataforma."
+---
+
+El catálogo de FusaShop reúne todos los productos publicados por las MiPymes registradas. Desde aquí puedes filtrar por categoría, buscar por nombre, entrar a la ficha detallada de un producto y explorar el directorio de comerciantes para conocer marcas específicas. Esta página te enseña a moverte con soltura.
+
+## Recorre el catálogo
+
+<Steps>
+  <Step title="Abre el catálogo">
+    Ve a `/shop/catalog` desde el menú principal o haz clic en **Catálogo** en la barra superior.
+  </Step>
+  <Step title="Aplica filtros">
+    Usa el panel lateral para filtrar por categoría, rango de precio o comerciante. Los filtros se combinan entre sí.
+  </Step>
+  <Step title="Busca por nombre">
+    Escribe el nombre del producto o palabras clave en la barra de búsqueda para encontrar coincidencias rápidas.
+  </Step>
+  <Step title="Abre la ficha del producto">
+    Haz clic en cualquier tarjeta para ir a `/shop/product/{id}` y ver descripción, fotos, precio, stock y reseñas.
+  </Step>
+</Steps>
+
+<Tip>
+  Combina la búsqueda por nombre con un filtro de categoría para acotar resultados. Por ejemplo, escribe "camiseta" y filtra por la categoría "Ropa".
+</Tip>
+
+## Directorio de comerciantes
+
+Si prefieres explorar por marca en lugar de por producto, usa el directorio.
+
+<Steps>
+  <Step title="Abre el directorio">
+    Ve a `/shop/directory` desde el enlace **Marcas** en el menú.
+  </Step>
+  <Step title="Selecciona una marca">
+    Haz clic en el nombre o el logo del comerciante para ir a su perfil en `/shop/directory/brand/{id}`.
+  </Step>
+  <Step title="Revisa su tienda">
+    Verás la información de la MiPyme, sus productos activos y sus reseñas.
+  </Step>
+</Steps>
+
+## Ficha detallada del producto
+
+En la ficha encontrarás toda la información para decidir tu compra:
+
+- Nombre, descripción y precio en pesos colombianos (COP).
+- Galería de imágenes del producto.
+- Disponibilidad y stock actual.
+- Reseñas y calificaciones de otros compradores.
+- Botón **Agregar al carrito** (requiere inicio de sesión).
+
+<Info>
+  Para agregar productos al carrito debes tener sesión iniciada y tu correo verificado. Si aún no completaste esos pasos, consulta [Verificar correo](/manual/verificar-correo).
+</Info>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Mi carrito" icon="cart-shopping" href="/manual/cliente/carrito">
+    Aprende a gestionar los productos que agregaste.
+  </Card>
+
+  <Card title="Finalizar compra" icon="credit-card" href="/manual/cliente/checkout">
+    Completa el pago de tu pedido.
+  </Card>
+</CardGroup>

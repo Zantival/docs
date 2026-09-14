@@ -1,0 +1,112 @@
+---
+title: "Requisitos del sistema para ejecutar FusaShop localmente"
+sidebarTitle: "Requisitos"
+description: "Conoce todos los requisitos de software necesarios para instalar FusaShop: PHP 8.2+, Node.js 20+, Composer 2, MySQL y extensiones PHP requeridas."
+---
+
+Antes de instalar FusaShop, asegúrate de que tu entorno cumpla con los siguientes requisitos. La plataforma está construida sobre Laravel 12 e integra un módulo de análisis en Python, por lo que necesitas tener varios componentes instalados y configurados correctamente.
+
+## Requisitos de software
+
+<CardGroup cols={2}>
+  <Card title="PHP 8.2+" icon="php" href="/instalacion/instalacion-local">
+    FusaShop requiere **PHP ^8.2** con las extensiones `pdo_mysql`, `mbstring`, `zip`, `exif`, `pcntl`, `bcmath` y `gd` habilitadas.
+  </Card>
+  <Card title="Composer 2.x" icon="box" href="/instalacion/instalacion-local">
+    El gestor de dependencias de PHP. Se usa para instalar Laravel 12 y todos los paquetes del proyecto (`laravel/framework ^12.0`, `laravel/sanctum ^4.0`, `laravel/socialite ^5.26`, etc.).
+  </Card>
+  <Card title="Node.js 20+ y npm" icon="node" href="/instalacion/instalacion-local">
+    Necesario para compilar los assets del frontend. El proyecto usa **Vite ^5.0** y **Tailwind CSS ^4.2.4**. La imagen Docker de referencia usa `node:20`.
+  </Card>
+  <Card title="MySQL 8.0+ o PostgreSQL 14+" icon="database" href="/instalacion/base-de-datos">
+    FusaShop soporta MySQL (configuración predeterminada en `.env`) y PostgreSQL como motores de base de datos en producción. SQLite es válido para entornos de desarrollo locales rápidos.
+  </Card>
+  <Card title="Python 3.8+" icon="python" href="/integraciones/modulo-python">
+    Requerido para el módulo de analítica (`python/analytics.py` y `python/ml_analyzer.py`). Opcionalmente instala `mysql-connector-python` y `pandas` para conectar con la base de datos real en lugar de usar datos de demostración.
+  </Card>
+  <Card title="Docker (opcional)" icon="docker" href="/instalacion/instalacion-local">
+    El proyecto incluye un `Dockerfile` multi-etapa listo para producción. Si prefieres contenedores, solo necesitas Docker 20+ instalado; no necesitas PHP ni Node.js en el host.
+  </Card>
+</CardGroup>
+
+## Versiones exactas de dependencias
+
+Las siguientes versiones provienen directamente de `composer.json` y `package.json` del proyecto.
+
+### Dependencias PHP (`composer.json`)
+
+| Paquete | Versión requerida |
+|---|---|
+| `php` | `^8.2` |
+| `laravel/framework` | `^12.0` |
+| `laravel/sanctum` | `^4.0` |
+| `laravel/socialite` | `^5.26` |
+| `laravel/tinker` | `^2.10` |
+| `resend/resend-laravel` | `^1.4` |
+| `symfony/http-client` | `^7.4` |
+| `symfony/mailgun-mailer` | `^7.4` |
+
+### Dependencias de desarrollo PHP
+
+| Paquete | Versión requerida |
+|---|---|
+| `fakerphp/faker` | `^1.23` |
+| `laravel/sail` | `^1.37` |
+| `mockery/mockery` | `^1.6` |
+| `nunomaduro/collision` | `^8.6` |
+| `phpunit/phpunit` | `^11.4.4` |
+
+### Dependencias Node.js (`package.json`)
+
+| Paquete | Versión requerida |
+|---|---|
+| `vite` | `^5.0` |
+| `tailwindcss` | `^4.2.4` |
+| `@tailwindcss/cli` | `^4.2.4` |
+| `laravel-vite-plugin` | `^1.0` |
+| `autoprefixer` | `^10.5.0` |
+| `postcss` | `^8.5.13` |
+| `axios` | `^1.7.4` |
+
+### Dependencias Python (`python/`)
+
+| Paquete | Notas |
+|---|---|
+| `mysql-connector-python` | Opcional; sin él se usan datos de demostración |
+| `pandas` | Opcional; requerido para análisis avanzado con DataFrames |
+
+<Note>
+  Si no instalas `mysql-connector-python`, el módulo de analítica funciona igualmente con datos simulados. El script muestra una advertencia en consola: `[WARN] mysql-connector-python no instalado. Usando datos demo.`
+</Note>
+
+## Extensiones PHP requeridas
+
+El `Dockerfile` incluido en el repositorio instala automáticamente todas las extensiones necesarias. Si instalas manualmente, asegúrate de habilitar:
+
+```bash title="Extensiones PHP necesarias"
+pdo_mysql   # Conexión a MySQL
+mbstring    # Manejo de cadenas multibyte
+zip         # Descompresión de paquetes Composer
+exif        # Metadatos de imágenes
+pcntl       # Control de procesos (colas)
+bcmath      # Aritmética de precisión arbitraria
+gd          # Procesamiento de imágenes
+```
+
+<Tip>
+  En Ubuntu/Debian puedes instalar todas las extensiones de una vez con:
+  `sudo apt-get install php8.2-mysql php8.2-mbstring php8.2-zip php8.2-exif php8.2-pcntl php8.2-bcmath php8.2-gd`
+</Tip>
+
+## Resumen de versiones mínimas
+
+| Componente | Versión mínima |
+|---|---|
+| PHP | 8.2 |
+| Composer | 2.x |
+| Node.js | 20.x (imagen Docker de referencia) |
+| npm | 10.x (incluido con Node.js 20) |
+| MySQL | 8.0 |
+| PostgreSQL | 14 |
+| Python | 3.8 |
+| Docker | 20.x (solo si usas contenedores) |

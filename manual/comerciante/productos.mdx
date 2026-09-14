@@ -1,0 +1,68 @@
+---
+title: "Publica y administra productos en tu tienda MiPyme"
+sidebarTitle: "Productos"
+description: "Crea productos, edita fichas, sube fotos y activa o desactiva artículos en tu catálogo de FusaShop desde el panel del comerciante."
+---
+
+La gestión de productos es el corazón de tu tienda en FusaShop. Desde `/merchant/products` puedes crear nuevos artículos, editar los existentes, cambiar precios, actualizar fotos y activar o desactivar productos según tu estrategia. Esta página cubre cada acción disponible.
+
+## Crear un producto
+
+<Steps>
+  <Step title="Abre el formulario">
+    Ve a `/merchant/products` y haz clic en **Nuevo producto**. Serás llevado a `/merchant/products/create`.
+  </Step>
+  <Step title="Ingresa los datos básicos">
+    Completa nombre, descripción, precio en pesos colombianos y categoría. Sé claro y específico en el nombre.
+  </Step>
+  <Step title="Sube fotos">
+    Carga entre 1 y 5 imágenes de buena calidad. La primera será la imagen principal en el catálogo.
+  </Step>
+  <Step title="Define el stock inicial">
+    Ingresa la cantidad disponible. Podrás ajustarla luego en [Inventario](/manual/comerciante/inventario).
+  </Step>
+  <Step title="Publica el producto">
+    Haz clic en **Guardar**. El producto aparecerá en tu catálogo y en la tienda pública `/shop/catalog`.
+  </Step>
+</Steps>
+
+<Tip>
+  Las fotos con buena iluminación y fondo neutro aumentan las ventas. Toma varias tomas del producto: frontal, lateral y algún detalle. Evita marcas de agua y logos superpuestos.
+</Tip>
+
+## Editar o eliminar un producto
+
+<Steps>
+  <Step title="Localiza el producto">
+    En `/merchant/products` usa el buscador o filtro por categoría para encontrarlo.
+  </Step>
+  <Step title="Abre la edición">
+    Haz clic en **Editar** para modificar nombre, precio, descripción, fotos o categoría.
+  </Step>
+  <Step title="Guarda los cambios">
+    Pulsa **Actualizar**. Los clientes verán los cambios de inmediato.
+  </Step>
+  <Step title="Eliminar (opcional)">
+    Si el producto ya no se comercializa, haz clic en **Eliminar** desde la lista. Esta acción es permanente.
+  </Step>
+</Steps>
+
+<Warning>
+  Eliminar un producto no borra las reseñas históricas ni los pedidos que lo incluyeron. Solo lo retira del catálogo público.
+</Warning>
+
+## Activar y desactivar
+
+Si quieres pausar la venta de un producto sin eliminarlo, usa el interruptor **Activo** en su ficha. Los productos desactivados no aparecen en el catálogo público pero conservan su historial.
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Inventario" icon="warehouse" href="/manual/comerciante/inventario">
+    Actualiza el stock disponible.
+  </Card>
+
+  <Card title="Pedidos" icon="clipboard-list" href="/manual/comerciante/pedidos">
+    Atiende las órdenes que recibes.
+  </Card>
+</CardGroup>

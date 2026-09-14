@@ -1,0 +1,245 @@
+---
+title: "Arquitectura de FusaShop: MVC, API REST y módulos"
+sidebarTitle: "Arquitectura"
+description: "Explora la estructura MVC de FusaShop: controladores por rol, rutas web y API, pila de middleware, Sanctum, Socialite y la integración con Python."
+---
+
+FusaShop sigue el patrón **MVC de Laravel** de forma estricta: las rutas delegan la lógica a controladores organizados por rol de usuario, los modelos representan cada entidad del dominio y las vistas renderizan la interfaz. Además de la capa web, el proyecto expone una **API REST** protegida con Laravel Sanctum que permite integraciones externas y el consumo de datos analíticos. A continuación encontrarás el mapa completo de la arquitectura, desde la estructura de carpetas hasta la pila de middleware.
+
+## Árbol de carpetas
+
+El siguiente bloque muestra las carpetas y archivos más relevantes del proyecto. Los comentarios indican el propósito de cada directorio.
+
+```text title="Estructura del proyecto FusaShop"
+fusashop2/
+├── app/
+│   ├── Http/
+│   │   ├── Controllers/
+│   │   │   ├── Analyst/
+│   │   │   │   └── AnalystController.php      # Panel admin + ML
+│   │   │   ├── Auth/
+│   │   │   │   ├── AuthController.php         # Login, registro, logout
+│   │   │   │   └── SocialAuthController.php   # OAuth (Google, GitHub)
+│   │   │   ├── Consumer/
+│   │   │   │   └── ConsumerController.php     # Tienda, carrito, checkout
+│   │   │   ├── Merchant/
+│   │   │   │   ├── MerchantController.php     # Dashboard comerciante
+│   │   │   │   └── CouponController.php       # Gestión de cupones
+│   │   │   ├── ApiController.php              # Endpoints REST públicos
+│   │   │   ├── ChatController.php             # Mensajería directa
+│   │   │   ├── PaymentController.php          # Integración PayU
+│   │   │   └── PQRSController.php             # Peticiones, quejas y reclamos
+│   │   └── Middleware/
+│   │       ├── RoleMiddleware.php             # Control de acceso por rol
+│   │       ├── EnsureKycApproved.php          # Puerta KYC para merchants
+│   │       ├── CheckCookieConsent.php         # Sincroniza cookie de consentimiento
+│   │       └── SecurityHeaders.php            # Cabeceras OWASP
+│   └── Models/
+│       ├── User.php          # Roles, Sanctum tokens, relaciones
+│       ├── Product.php       # Catálogo de productos
+│       ├── Order.php         # Pedidos de consumidores
+│       ├── OrderItem.php     # Líneas de cada pedido
+│       ├── Cart.php          # Carrito persistente
+│       ├── CartItem.php      # Artículos en el carrito
+│       ├── CompanyProfile.php# Perfil KYC del comerciante
+│       ├── Review.php        # Reseñas de productos
+│       ├── Message.php       # Mensajes del chat
+│       ├── PQRS.php          # Tickets de soporte
+│       ├── GlobalBanner.php  # Banners publicitarios globales
+│       ├── BannerRequest.php # Solicitudes de banner de merchants
+│       ├── Coupon.php        # Cupones de descuento
+│       └── LoyaltyPoint.php  # Puntos de fidelización
+├── routes/
+│   ├── web.php               # Rutas de la interfaz web
+│   └── api.php               # Endpoints REST (Sanctum)
+├── python/
+│   ├── ml_analyzer.py        # Motor de clustering ML
+│   └── analytics.py          # Análisis de datos de ventas
+└── .env.example              # Variables de entorno de referencia
+```
+
+## Rutas web vs. API
+
+FusaShop divide sus rutas en dos archivos con responsabilidades distintas.
+
+<Tabs>
+  <Tab title="routes/web.php">
+    Contiene todas las rutas de la interfaz de usuario. Están agrupadas por prefijo y protegidas con middleware según el rol:
+
+    - **`/`** — Redirige a la tienda pública (`consumer.home`).
+    - **`/shop/*`** — Rutas del consumidor: catálogo, detalle de producto, carrito y checkout. Las rutas de compra exigen `auth`, `verified` y `role:consumer`.
+    - **`/merchant/*`** — Rutas del comerciante: requieren `auth`, `verified` y `role:merchant`. Las rutas post-onboarding agregan `EnsureKycApproved`.
+    - **`/admin/*`** — Rutas del analista: requieren `auth` y `role:analyst`. No exigen verificación de correo porque los analistas la omiten por diseño.
+    - **`/chat`, `/pqrs`, `/notifications`** — Rutas compartidas para cualquier usuario autenticado.
+
+    ```php title="routes/web.php — grupos de rutas por rol"
+    // Comerciante: requiere autenticación, verificación y rol correcto
+    Route::middleware(['auth', 'verified', 'role:merchant'])
+        ->prefix('merchant')
+        ->name('merchant.')
+        ->group(function () {
+
+        // Solo rutas con KYC aprobado
+        Route::middleware([EnsureKycApproved::class])->group(function () {
+            Route::get('/dashboard', [MerchantController::class, 'dashboard'])
+                ->name('dashboard');
+            // ...más rutas de merchant
+        });
+    });
+
+    // Analista: auth + rol, sin verificación de correo
+    Route::middleware(['auth', 'role:analyst'])
+        ->prefix('admin')
+        ->name('analyst.')
+        ->group(function () {
+            Route::get('/dashboard', [AnalystController::class, 'dashboard'])
+                ->name('dashboard');
+            // ...más rutas de analista
+        });
+    ```
+  </Tab>
+  <Tab title="routes/api.php">
+    Expone endpoints REST consumibles por clientes externos o la SPA. Los endpoints públicos no requieren autenticación; los protegidos usan el guard `auth:sanctum`.
+
+    ```php title="routes/api.php — endpoints REST"
+    // Endpoints públicos
+    Route::post('/login',         [ApiController::class, 'login']);
+    Route::post('/register',      [ApiController::class, 'register']);
+    Route::get('/products',       [ApiController::class, 'products']);
+    Route::get('/products/{id}',  [ApiController::class, 'productShow']);
+
+    // Endpoints protegidos con Sanctum
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/logout',           [ApiController::class, 'logout']);
+        Route::get('/cart',              [ApiController::class, 'cart']);
+        Route::post('/cart',             [ApiController::class, 'cartAdd']);
+        Route::delete('/cart/{item}',    [ApiController::class, 'cartRemove']);
+        Route::get('/orders',            [ApiController::class, 'orders']);
+        Route::get('/analytics',         [AnalystController::class, 'analyticsData']);
+    });
+    ```
+
+    <Warning>
+      El endpoint `GET /api/analytics` requiere un token `auth:sanctum` válido pero no aplica restricción de rol en la capa de rutas ni dentro del controlador. Cualquier usuario autenticado puede consumirlo; si necesitas restringirlo a analistas, agrega `role:analyst` al grupo de middleware o una verificación explícita en `AnalystController::analyticsData()`.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Pila de middleware
+
+FusaShop registra cuatro middlewares de aplicación, cada uno con una responsabilidad precisa. Los middlewares se aplican a las rutas de forma declarativa en `web.php`.
+
+<Accordion title="RoleMiddleware — Control de acceso por rol">
+  Verifica que el usuario autenticado tenga el rol requerido. Si no está autenticado, redirige a `login`; si tiene un rol diferente, responde con HTTP 403.
+
+  ```php title="app/Http/Middleware/RoleMiddleware.php"
+  public function handle(Request $request, Closure $next, string ...$roles): mixed
+  {
+      if (!$request->user()) {
+          return redirect()->route('login');
+      }
+
+      if (!in_array($request->user()->role, $roles)) {
+          abort(403, 'Acceso no autorizado.');
+      }
+
+      return $next($request);
+  }
+  ```
+
+  Se usa en rutas con `'role:consumer'`, `'role:merchant'` o `'role:analyst'`.
+</Accordion>
+
+<Accordion title="EnsureKycApproved — Puerta de validación KYC">
+  Solo se aplica a comerciantes. Si el merchant no tiene un perfil de empresa (`CompanyProfile`) o su campo `kyc_status` no es `'approved'`, lo redirige a la página de onboarding con un mensaje explicativo.
+
+  ```php title="app/Http/Middleware/EnsureKycApproved.php"
+  public function handle(Request $request, Closure $next)
+  {
+      $user = Auth::user();
+      if ($user && $user->isMerchant()) {
+          if (!$user->companyProfile) {
+              return redirect()->route('merchant.profile')
+                  ->with('info', 'Por favor completa la configuración de tu perfil comercial.');
+          }
+          if ($user->companyProfile->kyc_status !== 'approved') {
+              return redirect()->route('merchant.profile')
+                  ->with('error', 'Tu cuenta está bajo revisión o no ha sido aprobada. '
+                      . 'Por favor espera a que un Analista valide tu RUT.');
+          }
+      }
+      return $next($request);
+  }
+  ```
+</Accordion>
+
+<Accordion title="CheckCookieConsent — Consentimiento de cookies">
+  Sincroniza la cookie `cookie_consent` del navegador con la sesión de PHP para que las vistas y otros middlewares puedan leerla sin acceder directamente a la cookie.
+
+  ```php title="app/Http/Middleware/CheckCookieConsent.php"
+  public function handle(Request $request, Closure $next): Response
+  {
+      if ($request->hasCookie('cookie_consent')) {
+          session(['cookie_consent' => $request->cookie('cookie_consent')]);
+      }
+      return $next($request);
+  }
+  ```
+</Accordion>
+
+<Accordion title="SecurityHeaders — Cabeceras de seguridad OWASP">
+  Inyecta cabeceras HTTP de seguridad en cada respuesta para mitigar ataques de tipo clickjacking, XSS y sniffing de tipos de contenido. En conexiones HTTPS agrega también `Strict-Transport-Security`.
+
+  | Cabecera | Valor | Propósito |
+  |---|---|---|
+  | `X-Frame-Options` | `DENY` | Previene clickjacking |
+  | `X-Content-Type-Options` | `nosniff` | Evita MIME sniffing |
+  | `X-XSS-Protection` | `1; mode=block` | Protección XSS legacy |
+  | `Content-Security-Policy` | `default-src 'self'` | Fuentes de contenido confiables |
+  | `Strict-Transport-Security` | `max-age=31536000` | Fuerza HTTPS (solo en HTTPS) |
+</Accordion>
+
+## Autenticación con Sanctum y OAuth con Socialite
+
+FusaShop usa dos mecanismos de autenticación complementarios:
+
+<CardGroup cols={2}>
+  <Card title="Laravel Sanctum" icon="lock" href="/api/autenticacion-api">
+    Provee tokens de API para la capa REST (`routes/api.php`). El guard `auth:sanctum` verifica el token `Bearer` en cada petición protegida. El modelo `User` incorpora el trait `HasApiTokens`.
+  </Card>
+  <Card title="Laravel Socialite" icon="google" href="/integraciones/socialite">
+    Permite el inicio de sesión con proveedores externos (Google, GitHub). `SocialAuthController` maneja la redirección OAuth en `GET /auth/{provider}/redirect` y el callback en `GET /auth/{provider}/callback`.
+  </Card>
+</CardGroup>
+
+## Integración con scripts Python
+
+El analista puede disparar el motor de análisis ML directamente desde el panel de administración. Laravel ejecuta los scripts de Python usando `Symfony\Component\Process\Process` —disponible como dependencia transitiva de `laravel/framework`— y pasa los datos como JSON a través de `stdin`.
+
+```php title="app/Http/Controllers/Analyst/AnalystController.php — runMl()"
+$scriptPath = base_path('python/ml_analyzer.py');
+
+$process = new Process(['python3', $scriptPath]);
+$process->setInput(json_encode($payload));  // datos de merchants como JSON
+$process->run();
+
+if (!$process->isSuccessful()) {
+    return back()->with('error', 'Error en el motor ML: ' . $process->getErrorOutput());
+}
+
+$output = json_decode($process->getOutput(), true);
+session()->flash('ml_results', $output['analytics'] ?? []);
+```
+
+<Warning>
+  Asegúrate de que `python3` esté disponible en el `PATH` del servidor donde corre Laravel. En producción, revisa los permisos del proceso y el entorno virtual de Python si usas dependencias externas.
+</Warning>
+
+## Envío de correo electrónico
+
+FusaShop soporta dos proveedores de correo según la configuración del archivo `.env`:
+
+- **Resend** (`resend/resend-laravel ^1.4`) — recomendado para producción por su API REST simple.
+- **Mailgun** (`symfony/mailgun-mailer ^7.4`) — alternativa robusta con soporte SMTP.
+
+Configura el `MAIL_MAILER` en `.env` para seleccionar el proveedor. El driver `log` está habilitado por defecto en el entorno local para evitar envíos reales durante el desarrollo.

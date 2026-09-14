@@ -1,0 +1,198 @@
+---
+title: "Cómo instalar y ejecutar FusaShop en desarrollo local"
+sidebarTitle: "Instalación Local"
+description: "Guía paso a paso para clonar, configurar y levantar FusaShop en tu entorno local: instala dependencias, migra la BD, carga seeders y levanta el servidor."
+---
+
+Esta guía te lleva desde cero hasta tener FusaShop corriendo en tu máquina local con datos de prueba listos para explorar. Existen dos caminos: instalación directa con PHP y Node.js en el host, o usando el `Dockerfile` multi-etapa incluido en el repositorio para un entorno completamente contenedorizado.
+
+## Instalación con PHP nativo
+
+Sigue cada paso en orden. Antes de empezar, verifica que tienes PHP 8.2+, Composer 2.x, Node.js 20+ y MySQL 8.0+ instalados (consulta la página de [Requisitos](/instalacion/requisitos)).
+
+<Steps>
+  <Step title="Clona el repositorio">
+    Descarga el código fuente de FusaShop en tu directorio de trabajo.
+
+    ```bash title="Clonar repositorio"
+    git clone https://github.com/Zantival/fusashop2.git fusashop
+    cd fusashop
+    ```
+  </Step>
+
+  <Step title="Instala las dependencias PHP">
+    Composer descarga todos los paquetes de Laravel y las librerías de terceros declarados en `composer.json`.
+
+    ```bash title="Instalar dependencias PHP"
+    composer install
+    ```
+
+    <Note>
+      En producción usa `composer install --no-dev --optimize-autoloader` para excluir paquetes de desarrollo y optimizar el autoloader.
+    </Note>
+  </Step>
+
+  <Step title="Instala las dependencias de Node.js">
+    npm descarga Vite, Tailwind CSS y el resto de herramientas del frontend declaradas en `package.json`.
+
+    ```bash title="Instalar dependencias Node"
+    npm install
+    ```
+  </Step>
+
+  <Step title="Crea el archivo de entorno">
+    Copia la plantilla de variables de entorno incluida en el repositorio. Más adelante editarás este archivo con los datos reales de tu entorno.
+
+    ```bash title="Crear .env"
+    cp .env.example .env
+    ```
+
+    Abre `.env` en tu editor y ajusta al menos las variables de base de datos (`DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`) antes de continuar. Consulta la guía de [Variables de Entorno](/instalacion/variables-de-entorno) para una referencia completa.
+  </Step>
+
+  <Step title="Genera la clave de aplicación">
+    Laravel necesita una clave única para cifrar sesiones, cookies y otros datos sensibles. Este comando genera y escribe la clave directamente en tu `.env`.
+
+    ```bash title="Generar APP_KEY"
+    php artisan key:generate
+    ```
+
+    Después de ejecutarlo, verás `APP_KEY=base64:...` en tu `.env`.
+  </Step>
+
+  <Step title="Crea la base de datos y ejecuta las migraciones">
+    Primero crea la base de datos en MySQL (o en el motor que prefieras), luego ejecuta las migraciones para crear todas las tablas.
+
+    ```sql title="Crear base de datos en MySQL"
+    CREATE DATABASE fusashop CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    ```
+
+    ```bash title="Ejecutar migraciones"
+    php artisan migrate
+    ```
+
+    FusaShop tiene 28 archivos de migración que crean tablas como `users`, `products`, `orders`, `carts`, `reviews`, `coupons`, `p_q_r_s` y más. Consulta la guía de [Base de Datos](/instalacion/base-de-datos) para el listado completo.
+  </Step>
+
+  <Step title="Carga los datos de prueba (seeders)">
+    El seeder crea usuarios de prueba para cada rol, productos de ejemplo y una orden de muestra. Ejecuta este paso para tener datos con los que explorar la plataforma desde el primer momento.
+
+    ```bash title="Ejecutar seeders"
+    php artisan db:seed
+    ```
+
+    Después del seeder tendrás disponibles los siguientes usuarios, todos con contraseña `password123`:
+
+    | Rol | Email |
+    |---|---|
+    | Analyst | `admin@fusashop.com` |
+    | Merchant | `tienda@fusashop.com` |
+    | Merchant | `tech@fusashop.com` |
+    | Consumer | `juan@fusashop.com` |
+    | Consumer | `maria@fusashop.com` |
+
+    <Warning>
+      Nunca ejecutes los seeders en un entorno de producción con datos reales. Están diseñados exclusivamente para desarrollo y pruebas.
+    </Warning>
+  </Step>
+
+  <Step title="Compila los assets del frontend">
+    Este comando compila y minifica Tailwind CSS, copia los assets compilados a `public/assets/` y genera el directorio `dist/`.
+
+    ```bash title="Compilar assets"
+    npm run build
+    ```
+
+    Si estás desarrollando activamente y quieres recompilación automática al guardar cambios de CSS, usa el modo observador:
+
+    ```bash title="Modo desarrollo (watch)"
+    npm run css:watch
+    ```
+  </Step>
+
+  <Step title="Levanta el servidor de desarrollo">
+    El servidor integrado de Artisan expone FusaShop en `http://localhost:8000` de forma predeterminada.
+
+    ```bash title="Iniciar servidor"
+    php artisan serve
+    ```
+
+    Abre tu navegador en [http://localhost:8000](http://localhost:8000) y verás la página principal de FusaShop. Inicia sesión con cualquiera de los usuarios de prueba creados en el paso anterior.
+
+    <Tip>
+      Para escuchar en un puerto diferente, usa `php artisan serve --port=8080`. Para aceptar conexiones desde otros dispositivos en tu red local, agrega `--host=0.0.0.0`.
+    </Tip>
+  </Step>
+</Steps>
+
+---
+
+## Instalación con Docker
+
+El repositorio incluye un `Dockerfile` multi-etapa optimizado para producción. La primera etapa usa `node:20` para compilar los assets del frontend; la segunda usa `php:8.2-apache` como imagen base y configura Apache con el módulo `mod_rewrite` necesario para las rutas de Laravel.
+
+<Steps>
+  <Step title="Construye la imagen Docker">
+    Desde la raíz del repositorio, construye la imagen. Docker ejecutará automáticamente la compilación del frontend y la instalación de dependencias PHP.
+
+    ```bash title="Build de imagen Docker"
+    docker build -t fusashop:latest .
+    ```
+  </Step>
+
+  <Step title="Levanta el contenedor">
+    Pasa las variables de entorno necesarias al contenedor. Al menos debes proporcionar la cadena de conexión a la base de datos (que debe ser accesible desde el contenedor).
+
+    ```bash title="Ejecutar contenedor"
+    docker run -d \
+      --name fusashop \
+      -p 80:80 \
+      -e DB_HOST=host.docker.internal \
+      -e DB_DATABASE=fusashop \
+      -e DB_USERNAME=root \
+      -e DB_PASSWORD=tu_password \
+      fusashop:latest
+    ```
+
+    <Note>
+      El `Dockerfile` genera automáticamente `APP_KEY` en el build mediante `php artisan key:generate --force`. Si necesitas persistir la clave entre reinicios, pásala como variable de entorno `-e APP_KEY=base64:...`.
+    </Note>
+  </Step>
+
+  <Step title="Ejecuta migraciones dentro del contenedor">
+    Una vez el contenedor esté en ejecución, corre las migraciones y los seeders desde dentro:
+
+    ```bash title="Migraciones en Docker"
+    docker exec -it fusashop php artisan migrate
+    docker exec -it fusashop php artisan db:seed
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  El `Dockerfile` expone el puerto `80` y configura Apache para servir desde `/var/www/html/public`. Si despliegas en Railway, Render u otras plataformas PaaS, estas leen el `Dockerfile` directamente — no necesitas configuración adicional.
+</Info>
+
+---
+
+## Comandos de referencia rápida
+
+```bash title="Resumen de comandos de instalación"
+# 1. Dependencias
+composer install
+npm install
+
+# 2. Entorno
+cp .env.example .env
+php artisan key:generate
+
+# 3. Base de datos
+php artisan migrate
+php artisan db:seed
+
+# 4. Frontend
+npm run build
+
+# 5. Servidor
+php artisan serve
+```

@@ -1,0 +1,113 @@
+---
+title: "FusaShop: Plataforma e-commerce multirol con Laravel"
+sidebarTitle: "Descripción General"
+description: "Conoce FusaShop: plataforma e-commerce construida con Laravel 12 que integra catálogo, pagos, chat, PQRS y análisis ML para tres roles de usuario."
+---
+
+FusaShop es una plataforma de comercio electrónico orientada a MiPymes colombianas, desarrollada con **Laravel 12** como núcleo principal. Reúne en un solo sistema todo lo que necesitan tres actores distintos —consumidores, comerciantes y analistas— para comprar, vender y supervisar el negocio de extremo a extremo. Cada módulo fue diseñado para operar de forma independiente pero integrada, desde la autenticación inicial hasta el análisis de datos con modelos de aprendizaje automático escritos en Python.
+
+## ¿Qué es FusaShop?
+
+FusaShop centraliza el ciclo de vida completo de una transacción: un consumidor explora el catálogo, agrega artículos al carrito, paga a través de PayU y luego puede dejar una reseña o abrir un PQRS. El comerciante —una MiPyme que supera el proceso KYC— administra sus productos, revisa pedidos y solicita banners publicitarios. El analista supervisa el sistema completo: aprueba KYC, gestiona usuarios, revisa reportes de ventas y ejecuta análisis de ML sobre el comportamiento de los comerciantes.
+
+## Módulos principales
+
+<CardGroup cols={2}>
+  <Card title="Autenticación y OAuth" icon="key" href="/modulos/autenticacion">
+    Registro, inicio de sesión, verificación de correo y recuperación de contraseña offline. OAuth con Google y GitHub vía **Laravel Socialite**.
+  </Card>
+  <Card title="Catálogo y Productos" icon="tag" href="/api/productos">
+    Listado público de productos con filtros por categoría. Cada comerciante gestiona su propio inventario desde el panel `/merchant`.
+  </Card>
+  <Card title="Carrito y Checkout" icon="cart-shopping" href="/api/carrito">
+    Carrito persistente en base de datos por consumidor. Proceso de compra con validación de cupones y cálculo de totales en tiempo real.
+  </Card>
+  <Card title="Pagos con PayU" icon="credit-card" href="/integraciones/payu">
+    Integración con la pasarela de pagos PayU para procesar transacciones seguras. El estado de cada orden se actualiza de forma automática.
+  </Card>
+  <Card title="Chat en tiempo real" icon="comments" href="/modulos/chat">
+    Mensajería directa entre consumidores y comerciantes mediante polling. Los mensajes se almacenan en el modelo `Message`.
+  </Card>
+  <Card title="PQRS" icon="envelope-open-text" href="/modulos/pqrs">
+    Sistema de Peticiones, Quejas, Reclamos y Sugerencias. Los analistas responden directamente desde el panel de administración.
+  </Card>
+  <Card title="Panel del Analista" icon="chart-line" href="/modulos/panel-analista">
+    Dashboard con métricas de ventas, gestión de usuarios, aprobación de KYC y banners globales. Incluye reporte de reseñas con análisis de sentimiento.
+  </Card>
+  <Card title="Machine Learning (Python)" icon="brain" href="/integraciones/modulo-python">
+    Scripts en Python (`ml_analyzer.py`, `analytics.py`) ejecutados desde Laravel con `Symfony\Process` para clustering y análisis predictivo de comerciantes.
+  </Card>
+</CardGroup>
+
+## Stack tecnológico
+
+FusaShop usa las siguientes tecnologías principales. Puedes consultarlas en el archivo `composer.json` de la raíz del proyecto.
+
+| Capa | Tecnología | Versión |
+|---|---|---|
+| Framework backend | Laravel | ^12.0 |
+| Lenguaje | PHP | ^8.2 |
+| Autenticación API | Laravel Sanctum | ^4.0 |
+| OAuth social | Laravel Socialite | ^5.26 |
+| Correo electrónico | Resend + Mailgun | ^1.4 / ^7.4 |
+| Integración Python | Symfony Process | ^7.4 |
+| Base de datos | MySQL | — |
+| Pruebas | PHPUnit | ^11.4 |
+| Entorno de desarrollo | Laravel Sail | ^1.37 |
+
+<Note>
+  El archivo `.env.example` incluye la zona horaria `America/Bogota` y localización `es_CO`, lo que refleja el enfoque del sistema hacia el mercado colombiano.
+</Note>
+
+## Los tres roles
+
+FusaShop distingue tres tipos de usuario, cada uno con su propio espacio dentro de la aplicación:
+
+<CardGroup cols={3}>
+  <Card title="Consumer" icon="user" href="/modulos/consumidores">
+    Explora el catálogo, compra productos, gestiona su carrito y sus pedidos, deja reseñas y abre PQRS.
+  </Card>
+  <Card title="Merchant (MiPyme)" icon="store" href="/modulos/comerciantes">
+    Crea y administra productos, gestiona pedidos entrantes, solicita banners y atiende a clientes por chat. Debe superar la validación KYC.
+  </Card>
+  <Card title="Analyst" icon="user-tie" href="/modulos/panel-analista">
+    Supervisa toda la plataforma: aprueba KYC, gestiona usuarios, revisa pagos, ejecuta ML y controla banners globales.
+  </Card>
+</CardGroup>
+
+La columna `role` de la tabla `users` contiene el valor `consumer`, `merchant` o `analyst`, y el middleware `RoleMiddleware` usa ese valor para conceder o denegar acceso a cada grupo de rutas.
+
+## Cómo está organizado este manual
+
+Este manual está dividido en secciones temáticas. Empieza por la introducción si es tu primera vez con el proyecto; luego, navega directamente a la sección que corresponda a tu área de trabajo.
+
+<CardGroup cols={2}>
+  <Card
+    title="Arquitectura"
+    icon="sitemap"
+    href="/introduccion/arquitectura"
+  >
+    Estructura MVC, árbol de carpetas, rutas web vs. API y pila de middleware.
+  </Card>
+  <Card
+    title="Roles y Permisos"
+    icon="shield-halved"
+    href="/introduccion/roles-y-permisos"
+  >
+    Cómo funciona el sistema de roles, el middleware de acceso y la puerta KYC.
+  </Card>
+  <Card
+    title="Autenticación"
+    icon="right-to-bracket"
+    href="/modulos/autenticacion"
+  >
+    Registro, inicio de sesión, verificación de correo y OAuth con Socialite.
+  </Card>
+  <Card
+    title="Panel del Analista"
+    icon="chart-bar"
+    href="/modulos/panel-analista"
+  >
+    Métricas globales, gestión de KYC, banners y ejecución del motor ML.
+  </Card>
+</CardGroup>

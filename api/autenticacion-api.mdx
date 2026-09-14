@@ -1,0 +1,221 @@
+---
+title: "Autenticación en la API REST de FusaShop con Sanctum"
+sidebarTitle: "Autenticación API"
+description: "Aprende a registrarte, iniciar sesión y usar tokens Bearer de Laravel Sanctum para autenticar solicitudes en la API REST de FusaShop."
+---
+
+La API REST de FusaShop usa **Laravel Sanctum** para la autenticación basada en tokens. Cada vez que inicias sesión o te registras, la API te devuelve un token de acceso personal que debes incluir en el encabezado `Authorization` de todas las solicitudes protegidas. Este mecanismo es stateless: no se utilizan cookies ni sesiones del servidor.
+
+## Registro de usuario
+
+Crea una cuenta nueva enviando los datos del usuario. El rol puede ser `consumer` (comprador) o `merchant` (MiPyme vendedora). Al registrarse con rol `consumer`, se crea automáticamente un carrito vacío asociado a la cuenta.
+
+### Parámetros del cuerpo
+
+<ParamField body="name" type="string" required>
+  Nombre completo del usuario. Máximo 255 caracteres.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Correo electrónico único en el sistema.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Contraseña. Mínimo 8 caracteres.
+</ParamField>
+
+<ParamField body="password_confirmation" type="string" required>
+  Confirmación de contraseña. Debe coincidir exactamente con `password`.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  Rol del usuario. Valores permitidos: `consumer`, `merchant`.
+</ParamField>
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X POST https://tusitio.com/api/register \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{
+    "name": "Ana Gómez",
+    "email": "ana@ejemplo.com",
+    "password": "secreto123",
+    "password_confirmation": "secreto123",
+    "role": "consumer"
+  }'
+```
+
+```json Respuesta 201 Created
+{
+  "token": "1|aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
+  "user": {
+    "id": 42,
+    "name": "Ana Gómez",
+    "email": "ana@ejemplo.com",
+    "role": "consumer",
+    "phone": null,
+    "address": null,
+    "avatar": null,
+    "is_blocked": false,
+    "created_at": "2025-01-15T10:30:00.000000Z",
+    "updated_at": "2025-01-15T10:30:00.000000Z"
+  }
+}
+```
+
+</CodeGroup>
+
+---
+
+## Inicio de sesión
+
+Autentica a un usuario existente con su correo y contraseña. La respuesta incluye el token de acceso, los datos del usuario y su rol, lo que permite al cliente redirigir al panel correcto (`consumer`, `merchant` o `analyst`).
+
+### Parámetros del cuerpo
+
+<ParamField body="email" type="string" required>
+  Correo electrónico registrado en FusaShop.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Contraseña de la cuenta.
+</ParamField>
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X POST https://tusitio.com/api/login \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{
+    "email": "ana@ejemplo.com",
+    "password": "secreto123"
+  }'
+```
+
+```json Respuesta 200 OK
+{
+  "token": "2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210",
+  "user": {
+    "id": 42,
+    "name": "Ana Gómez",
+    "email": "ana@ejemplo.com",
+    "role": "consumer",
+    "phone": null,
+    "address": null,
+    "avatar": null,
+    "is_blocked": false,
+    "created_at": "2025-01-15T10:30:00.000000Z",
+    "updated_at": "2025-01-15T10:30:00.000000Z"
+  },
+  "role": "consumer"
+}
+```
+
+</CodeGroup>
+
+---
+
+## Uso del token en solicitudes protegidas
+
+Una vez que tienes el token, inclúyelo en el encabezado `Authorization` usando el esquema `Bearer`. Todas las rutas del grupo `auth:sanctum` requieren este encabezado.
+
+```bash title="Ejemplo con encabezado Authorization"
+curl -X GET https://tusitio.com/api/cart \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210"
+```
+
+<Note>
+  Guarda el token de forma segura en tu cliente (por ejemplo, en `localStorage` o en el almacenamiento seguro de la app móvil). La API no expone un endpoint para recuperar tokens existentes; si lo pierdes, debes hacer login nuevamente.
+</Note>
+
+---
+
+## Cierre de sesión
+
+Invalida el token de acceso actual del usuario autenticado. Después de llamar a este endpoint, el token queda revocado y no puede usarse en nuevas solicitudes.
+
+<Warning>
+  Este endpoint requiere autenticación. Incluye el encabezado `Authorization: Bearer {token}` en la solicitud.
+</Warning>
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X POST https://tusitio.com/api/logout \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210"
+```
+
+```json Respuesta 200 OK
+{
+  "message": "Sesión cerrada."
+}
+```
+
+</CodeGroup>
+
+---
+
+## Respuestas de error
+
+La API devuelve errores estructurados en JSON. La siguiente tabla resume los códigos más comunes en los endpoints de autenticación.
+
+<AccordionGroup>
+
+<Accordion title="401 Unauthorized — Credenciales incorrectas">
+  Se devuelve cuando el correo no existe o la contraseña no coincide. No se indica cuál de los dos campos es incorrecto por razones de seguridad.
+
+  ```json
+  {
+    "message": "Credenciales incorrectas."
+  }
+  ```
+</Accordion>
+
+<Accordion title="422 Unprocessable Entity — Validación fallida">
+  Se devuelve cuando algún campo obligatorio falta o no cumple las reglas de validación (p. ej., correo duplicado, contraseñas que no coinciden, rol inválido).
+
+  ```json
+  {
+    "message": "The email has already been taken.",
+    "errors": {
+      "email": ["The email has already been taken."],
+      "role": ["The selected role is invalid."]
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="401 Unauthorized — Token inválido o ausente">
+  Se devuelve cuando intentas acceder a un endpoint protegido sin un token válido, o después de haber cerrado sesión.
+
+  ```json
+  {
+    "message": "Unauthenticated."
+  }
+  ```
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Endpoint exclusivo para analistas
+
+El endpoint `GET /api/analytics` está disponible únicamente para usuarios con rol `analyst`. Al igual que los demás endpoints protegidos, requiere un token Sanctum válido en el encabezado `Authorization`. Intentar acceder con un rol diferente resulta en `403 Forbidden`.
+
+<Note>
+  Los usuarios con rol `analyst` se crean directamente desde el panel de administración; el endpoint `POST /api/register` solo acepta los roles `consumer` y `merchant`. Consulta el [Panel del Analista](/modulos/panel-analista) para más información sobre este rol.
+</Note>
+
+---
+
+## Límite de solicitudes (Rate Limiting)
+
+<Note>
+  La API aplica un límite de solicitudes por defecto de Laravel Sanctum. Si tu aplicación requiere mayor capacidad, ajusta el throttle en la configuración de tu entorno de despliegue antes de salir a producción.
+</Note>

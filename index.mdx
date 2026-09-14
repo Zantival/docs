@@ -1,0 +1,55 @@
+---
+title: "FusaShop: Manual del Desarrollador"
+sidebarTitle: "Inicio"
+description: "Documentación técnica completa de FusaShop, plataforma e-commerce multirol construida con Laravel 12, Sanctum y Vue.js."
+---
+
+FusaShop es una plataforma de comercio electrónico construida con **Laravel 12** que soporta tres roles de usuario: consumidores, comerciantes (MiPymes) y analistas. Este manual cubre todo lo que un desarrollador necesita para instalar, configurar, extender e integrar la plataforma.
+
+<CardGroup cols={2}>
+  <Card title="Descripción General" icon="book-open" href="/introduccion/descripcion-general">
+    Visión general de la plataforma, sus módulos y cómo se relacionan entre sí.
+  </Card>
+  <Card title="Instalación Local" icon="laptop-code" href="/instalacion/instalacion-local">
+    Levanta FusaShop en tu entorno de desarrollo en minutos.
+  </Card>
+  <Card title="API REST" icon="code" href="/api/autenticacion-api">
+    Referencia completa de los endpoints públicos con ejemplos de request y response.
+  </Card>
+  <Card title="Módulos Principales" icon="puzzle-piece" href="/modulos/autenticacion">
+    Autenticación, carrito, pagos, chat y PQRS explicados en detalle.
+  </Card>
+</CardGroup>
+
+## Primeros Pasos
+
+<Steps>
+  <Step title="Revisa los requisitos">
+    Asegúrate de tener PHP 8.2+, MySQL/PostgreSQL y Node.js. Consulta [Requisitos del Sistema](/instalacion/requisitos).
+  </Step>
+  <Step title="Instala el proyecto">
+    Clona el repositorio, instala dependencias y configura el entorno. Sigue la guía de [Instalación Local](/instalacion/instalacion-local).
+  </Step>
+  <Step title="Configura las variables de entorno">
+    Ajusta credenciales de base de datos, correo y pasarela de pagos en el archivo `.env`. Ver [Variables de Entorno](/instalacion/variables-de-entorno).
+  </Step>
+  <Step title="Explora los módulos">
+    Familiarízate con los módulos de [Autenticación](/modulos/autenticacion), [Comerciantes](/modulos/comerciantes) y la [API REST](/api/autenticacion-api).
+  </Step>
+</Steps>
+
+## Arquitectura en un vistazo
+
+FusaShop sigue el patrón MVC de Laravel con controladores organizados por rol. La API REST utiliza Laravel Sanctum para autenticación basada en tokens. Los pagos se procesan a través de PayU y el módulo de análisis se apoya en scripts Python que el backend ejecuta mediante `symfony/process`.
+
+<CardGroup cols={3}>
+  <Card title="Roles y Permisos" icon="users" href="/introduccion/roles-y-permisos">
+    Entender el sistema de roles: consumer, merchant y analyst.
+  </Card>
+  <Card title="Integración PayU" icon="credit-card" href="/integraciones/payu">
+    Configura la pasarela de pagos y maneja los webhooks.
+  </Card>
+  <Card title="Módulo Python" icon="chart-line" href="/integraciones/modulo-python">
+    Análisis de rendimiento y clasificación ML de comerciantes.
+  </Card>
+</CardGroup>

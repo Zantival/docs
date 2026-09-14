@@ -1,0 +1,278 @@
+---
+title: "Autenticación social con Laravel Socialite en FusaShop"
+sidebarTitle: "OAuth Social"
+description: "Integra Google y Facebook OAuth en FusaShop con Socialite: credenciales, rutas redirect/callback y creación automática de consumidores sin contraseña."
+---
+
+FusaShop integra **Laravel Socialite** para permitir que los consumidores inicien sesión o se registren usando su cuenta de Google (y potencialmente otros proveedores OAuth2 como Facebook) sin necesidad de crear una contraseña. El paquete `laravel/socialite` ya está incluido en `composer.json`. La clase `SocialAuthController` gestiona la redirección al proveedor y el procesamiento del callback: si el correo ya existe en la base de datos, vincula el proveedor a la cuenta existente; si no, crea automáticamente un nuevo usuario con rol `consumer` y su carrito asociado.
+
+## Proveedores configurados
+
+El archivo `config/services.php` ya incluye los bloques de configuración para Google y Facebook:
+
+```php title="config/services.php"
+'google' => [
+    'client_id'     => env('GOOGLE_CLIENT_ID'),
+    'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+    'redirect'      => env('APP_URL', 'http://localhost:8000') . '/auth/google/callback',
+],
+
+'facebook' => [
+    'client_id'     => env('FACEBOOK_CLIENT_ID'),
+    'client_secret' => env('FACEBOOK_CLIENT_SECRET'),
+    'redirect'      => env('APP_URL', 'http://localhost:8000') . '/auth/facebook/callback',
+],
+```
+
+## Variables de entorno requeridas
+
+Agrega las credenciales de cada proveedor que vayas a activar en tu `.env`:
+
+```ini title=".env"
+# Google OAuth
+GOOGLE_CLIENT_ID=tu-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=tu-client-secret
+# La URL de redirección se construye automáticamente desde APP_URL
+
+# Facebook OAuth (opcional)
+FACEBOOK_CLIENT_ID=tu-app-id
+FACEBOOK_CLIENT_SECRET=tu-app-secret
+```
+
+<Note>
+  La `redirect` URI en `config/services.php` se genera concatenando `APP_URL` con
+  `/auth/{provider}/callback`. Asegúrate de registrar exactamente esa URL en la
+  consola del proveedor OAuth.
+</Note>
+
+## Rutas
+
+Las dos rutas de OAuth están registradas en el grupo de invitados (`guest`) de `routes/web.php`:
+
+```php title="routes/web.php"
+Route::get('/auth/{provider}/redirect', [
+    \App\Http\Controllers\Auth\SocialAuthController::class, 'redirect'
+])->name('social.redirect');
+
+Route::get('/auth/{provider}/callback', [
+    \App\Http\Controllers\Auth\SocialAuthController::class, 'callback'
+])->name('social.callback');
+```
+
+El segmento `{provider}` es dinámico, así que ambas rutas funcionan para cualquier proveedor registrado en `config/services.php` (por ejemplo `google`, `facebook`).
+
+## Flujo de autenticación OAuth
+
+<Steps>
+  <Step title="El usuario hace clic en 'Continuar con Google'">
+    El enlace o botón apunta a la ruta nombrada `social.redirect` con el
+    parámetro del proveedor:
+
+    ```blade title="resources/views/auth/login.blade.php"
+    <a href="{{ route('social.redirect', ['provider' => 'google']) }}">
+        Continuar con Google
+    </a>
+    ```
+  </Step>
+
+  <Step title="SocialAuthController::redirect() — redirección al proveedor">
+    El método `redirect()` delega completamente en Socialite. El usuario es
+    redirigido a la pantalla de consentimiento de Google:
+
+    ```php title="app/Http/Controllers/Auth/SocialAuthController.php"
+    public function redirect($provider)
+    {
+        return Socialite::driver($provider)->redirect();
+    }
+    ```
+  </Step>
+
+  <Step title="El usuario autoriza la aplicación en Google">
+    Google muestra la pantalla de permisos. Si el usuario acepta, Google
+    redirige a `/auth/google/callback` con un código de autorización.
+  </Step>
+
+  <Step title="SocialAuthController::callback() — procesamiento del retorno">
+    Socialite intercambia el código por un token de acceso y obtiene los datos
+    del usuario. A partir de ahí, el controlador sigue dos caminos:
+
+    ```php title="app/Http/Controllers/Auth/SocialAuthController.php"
+    public function callback($provider)
+    {
+        try {
+            $socialUser = Socialite::driver($provider)->user();
+
+            $user = User::where('email', $socialUser->getEmail())->first();
+
+            if ($user) {
+                // Usuario existente: vincular proveedor si aún no está vinculado
+                if (!$user->provider_id) {
+                    $user->update([
+                        'provider'    => $provider,
+                        'provider_id' => $socialUser->getId(),
+                    ]);
+                }
+                Auth::login($user, true);
+                return $this->redirectByRole($user);
+            }
+
+            // Usuario nuevo: crear como consumer con contraseña nula
+            $newUser = User::create([
+                'name'        => $socialUser->getName() ?? 'Usuario',
+                'email'       => $socialUser->getEmail(),
+                'provider'    => $provider,
+                'provider_id' => $socialUser->getId(),
+                'role'        => 'consumer',
+                'password'    => null,
+            ]);
+
+            Cart::create(['user_id' => $newUser->id]);
+
+            Auth::login($newUser, true);
+            return redirect()->route('consumer.home')
+                ->with('success', '¡Cuenta creada exitosamente con ' . ucfirst($provider) . '!');
+
+        } catch (\Exception $e) {
+            return redirect()->route('login')
+                ->withErrors(['email' => 'No se pudo iniciar sesión con '
+                    . ucfirst($provider) . '. ' . $e->getMessage()]);
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Redirección según rol">
+    Para usuarios existentes, el método privado `redirectByRole()` dirige al
+    dashboard correcto según el rol:
+
+    ```php title="app/Http/Controllers/Auth/SocialAuthController.php"
+    private function redirectByRole(User $user)
+    {
+        if ($user->role === 'merchant') {
+            if (!$user->companyProfile) {
+                return redirect()->route('merchant.subscription');
+            }
+            return redirect()->route('merchant.dashboard');
+        }
+
+        return match ($user->role) {
+            'analyst' => redirect()->route('analyst.dashboard'),
+            default   => redirect()->route('consumer.home'),
+        };
+    }
+    ```
+  </Step>
+</Steps>
+
+## Comportamiento según el caso de uso
+
+<CardGroup cols={2}>
+  <Card title="Correo ya registrado" icon="user-check">
+    Si el correo del proveedor OAuth coincide con un usuario existente y ese
+    usuario aún no tiene `provider_id`, se actualizan los campos `provider` y
+    `provider_id`. Después se inicia sesión con `remember = true`.
+  </Card>
+  <Card title="Correo nuevo" icon="user-plus">
+    Se crea un nuevo `User` con `role = 'consumer'` y `password = null`.
+    Inmediatamente se crea un `Cart` vacío asociado al nuevo usuario.
+  </Card>
+  <Card title="Usuario merchant" icon="store">
+    Si el usuario merchant no tiene `companyProfile` (perfil de empresa), se
+    le redirige a la ruta de suscripción/onboarding en lugar del dashboard.
+  </Card>
+  <Card title="Error OAuth" icon="circle-xmark">
+    Cualquier excepción lanzada por Socialite captura el mensaje y redirige de
+    vuelta a `/login` con un error en el campo `email`.
+  </Card>
+</CardGroup>
+
+## Configurar Google OAuth desde cero
+
+<Steps>
+  <Step title="Crear un proyecto en Google Cloud Console">
+    Visita [console.cloud.google.com](https://console.cloud.google.com) y crea
+    un proyecto nuevo para FusaShop.
+  </Step>
+
+  <Step title="Habilitar la API de OAuth2">
+    Navega a **APIs y servicios → Biblioteca** y habilita la **Google Identity
+    API** (también conocida como Google+ API o People API según la versión de
+    la consola).
+  </Step>
+
+  <Step title="Crear credenciales OAuth">
+    Ve a **APIs y servicios → Credenciales → Crear credenciales →
+    ID de cliente OAuth**. Selecciona **Aplicación web** y añade la URL
+    autorizada de redirección:
+
+    ```
+    http://localhost:8000/auth/google/callback   # desarrollo
+    https://tusitio.com/auth/google/callback     # producción
+    ```
+  </Step>
+
+  <Step title="Copiar las credenciales al .env">
+    Copia el **Client ID** y el **Client Secret** generados y pégalos en tu
+    `.env`:
+
+    ```ini title=".env"
+    GOOGLE_CLIENT_ID=123456789-xxxx.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxx
+    ```
+  </Step>
+
+  <Step title="Limpiar la caché de configuración">
+    ```bash
+    php artisan config:clear
+    php artisan cache:clear
+    ```
+  </Step>
+
+  <Step title="Probar el flujo">
+    Visita `/login` en tu navegador y haz clic en **Continuar con Google**.
+    Deberías ver la pantalla de selección de cuenta de Google.
+  </Step>
+</Steps>
+
+## Añadir un proveedor nuevo
+
+Para agregar un proveedor adicional (por ejemplo, GitHub):
+
+<Steps>
+  <Step title="Añadir el bloque en config/services.php">
+    ```php title="config/services.php"
+    'github' => [
+        'client_id'     => env('GITHUB_CLIENT_ID'),
+        'client_secret' => env('GITHUB_CLIENT_SECRET'),
+        'redirect'      => env('APP_URL') . '/auth/github/callback',
+    ],
+    ```
+  </Step>
+
+  <Step title="Agregar las credenciales al .env">
+    ```ini title=".env"
+    GITHUB_CLIENT_ID=tu-github-client-id
+    GITHUB_CLIENT_SECRET=tu-github-client-secret
+    ```
+  </Step>
+
+  <Step title="Verificar compatibilidad con Socialite">
+    Los proveedores de primera clase de Socialite (Google, Facebook, Twitter,
+    GitHub, LinkedIn, GitLab, Bitbucket) no requieren paquetes adicionales. Para
+    otros proveedores, consulta
+    [Socialite Providers](https://socialiteproviders.com/) e instala el paquete
+    correspondiente.
+  </Step>
+
+  <Step title="Añadir el botón en la vista de login">
+    Las rutas `social.redirect` y `social.callback` ya aceptan cualquier
+    `{provider}` de forma dinámica, así que no necesitas registrar rutas nuevas.
+  </Step>
+</Steps>
+
+<Tip>
+  Los usuarios registrados con OAuth no tienen contraseña (`password = null`).
+  Si necesitan acceder por contraseña en el futuro, deben usar el flujo de
+  restablecimiento de contraseña. Considera mostrarles una nota en su perfil
+  indicando que iniciaron sesión vía proveedor social.
+</Tip>

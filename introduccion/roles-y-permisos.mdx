@@ -1,0 +1,258 @@
+---
+title: "Roles y permisos en FusaShop: consumer, merchant y analyst"
+sidebarTitle: "Roles y Permisos"
+description: "Comprende los roles consumer, merchant y analyst en FusaShop: middleware de acceso, puerta KYC y exención de verificación de correo para analistas."
+---
+
+FusaShop implementa un sistema de roles basado en una columna `role` de la tabla `users`. Cada usuario pertenece exactamente a uno de los tres roles posibles: `consumer`, `merchant` o `analyst`. Esta columna es la fuente de verdad para todo el control de acceso: el middleware `RoleMiddleware` la lee en cada petición para decidir si el usuario puede avanzar o si debe recibir un error 403. A continuación encontrarás todo lo que necesitas saber sobre las capacidades de cada rol, cómo se aplica el control de acceso y dónde vive la lógica en el código fuente.
+
+## Los tres roles
+
+<CardGroup cols={3}>
+  <Card title="consumer" icon="user" href="/modulos/consumidores">
+    El comprador. Explora el catálogo público, gestiona su carrito, realiza pedidos, deja reseñas y abre PQRS. Requiere verificación de correo electrónico.
+  </Card>
+  <Card title="merchant" icon="store" href="/modulos/comerciantes">
+    La MiPyme vendedora. Administra sus productos, inventario, pedidos y reseñas. Debe completar el perfil de empresa y superar la validación KYC antes de operar.
+  </Card>
+  <Card title="analyst" icon="user-tie" href="/modulos/panel-analista">
+    El administrador de la plataforma. Supervisa usuarios, aprueba KYC, controla banners, revisa pagos y ejecuta análisis de ML. No requiere verificación de correo.
+  </Card>
+</CardGroup>
+
+## Tabla de capacidades por rol
+
+La siguiente tabla resume qué puede hacer cada rol dentro de FusaShop:
+
+| Capacidad | consumer | merchant | analyst |
+|---|:---:|:---:|:---:|
+| Ver catálogo y productos | ✅ | ✅ | ✅ |
+| Agregar al carrito y hacer checkout | ✅ | — | — |
+| Ver y gestionar sus pedidos | ✅ | — | — |
+| Dejar reseñas de productos | ✅ | — | — |
+| Crear y editar productos propios | — | ✅ | — |
+| Gestionar inventario | — | ✅ | — |
+| Actualizar estado de pedidos recibidos | — | ✅ | — |
+| Responder reseñas | — | ✅ | — |
+| Ver finanzas propias | — | ✅ | — |
+| Solicitar banners publicitarios | — | ✅ | — |
+| Abrir PQRS | ✅ | ✅ | — |
+| Enviar mensajes de chat | ✅ | ✅ | — |
+| Gestionar todos los usuarios | — | — | ✅ |
+| Aprobar o rechazar KYC | — | — | ✅ |
+| Administrar banners globales | — | — | ✅ |
+| Ver reportes de ventas y pagos | — | — | ✅ |
+| Ejecutar motor de análisis ML | — | — | ✅ |
+| Responder PQRS | — | — | ✅ |
+| Ver datos de analytics vía API | — | — | ✅ |
+
+<Info>
+  Un usuario con rol `merchant` puede acceder al chat y a las rutas compartidas (`/notifications`, `/account/profile`) porque están protegidas solo con `auth`, no con `role:merchant`.
+</Info>
+
+## El modelo `User` y sus métodos de rol
+
+El modelo `User` implementa tres métodos de conveniencia que devuelven `true` si el usuario tiene el rol correspondiente. Úsalos en controladores, políticas y vistas en lugar de comparar la cadena `role` directamente.
+
+```php title="app/Models/User.php — métodos de rol"
+// role: consumer | merchant | analyst
+public function isConsumer(): bool { return $this->role === 'consumer'; }
+public function isMerchant(): bool { return $this->role === 'merchant'; }
+public function isAnalyst(): bool  { return $this->role === 'analyst'; }
+```
+
+El modelo también declara los campos que se pueden asignar en masa y los castings relevantes:
+
+```php title="app/Models/User.php — fillable y casts"
+protected $fillable = [
+    'name', 'email', 'password', 'role',
+    'phone', 'address', 'avatar', 'is_blocked',
+];
+
+protected function casts(): array
+{
+    return [
+        'email_verified_at' => 'datetime',
+        'password'          => 'hashed',
+        'is_blocked'        => 'boolean',
+    ];
+}
+```
+
+### Relaciones del modelo según el rol
+
+Cada rol tiene relaciones Eloquent distintas que reflejan su responsabilidad en el sistema:
+
+<Tabs>
+  <Tab title="consumer">
+    ```php title="app/Models/User.php — relaciones del consumer"
+    // Un consumidor tiene muchos pedidos
+    public function orders() {
+        return $this->hasMany(Order::class);
+    }
+
+    // Un consumidor tiene un carrito persistente
+    public function cart() {
+        return $this->hasOne(Cart::class);
+    }
+    ```
+  </Tab>
+  <Tab title="merchant">
+    ```php title="app/Models/User.php — relaciones del merchant"
+    // Un merchant tiene muchos productos propios
+    public function products() {
+        return $this->hasMany(Product::class, 'merchant_id');
+    }
+
+    // Un merchant tiene un perfil de empresa con datos KYC
+    public function companyProfile() {
+        return $this->hasOne(CompanyProfile::class, 'merchant_id');
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## RoleMiddleware: cómo se aplica el control de acceso
+
+`RoleMiddleware` es el guardián principal de FusaShop. Recibe uno o más nombres de rol como argumento y verifica que el usuario autenticado tenga alguno de ellos. Si el usuario no está autenticado, lo redirige a `login`; si está autenticado pero con un rol incorrecto, lanza una excepción HTTP 403.
+
+```php title="app/Http/Middleware/RoleMiddleware.php"
+class RoleMiddleware
+{
+    public function handle(Request $request, Closure $next, string ...$roles): mixed
+    {
+        if (!$request->user()) {
+            return redirect()->route('login');
+        }
+
+        if (!in_array($request->user()->role, $roles)) {
+            abort(403, 'Acceso no autorizado.');
+        }
+
+        return $next($request);
+    }
+}
+```
+
+Para aplicar el middleware en una ruta o grupo de rutas, usa la clave `role` seguida del nombre del rol:
+
+```php title="routes/web.php — uso de RoleMiddleware"
+// Solo consumers verificados
+Route::middleware(['auth', 'verified', 'role:consumer'])
+    ->prefix('shop')
+    ->group(function () {
+        Route::get('/cart', [ConsumerController::class, 'cartIndex'])->name('consumer.cart');
+    });
+
+// Solo merchants verificados
+Route::middleware(['auth', 'verified', 'role:merchant'])
+    ->prefix('merchant')
+    ->group(function () {
+        Route::get('/profile', [MerchantController::class, 'onboardingProfile'])
+            ->name('merchant.profile');
+    });
+
+// Solo analysts (sin 'verified' porque los analistas la omiten)
+Route::middleware(['auth', 'role:analyst'])
+    ->prefix('admin')
+    ->group(function () {
+        Route::get('/dashboard', [AnalystController::class, 'dashboard'])
+            ->name('analyst.dashboard');
+    });
+```
+
+<Warning>
+  No apliques `'verified'` a las rutas de analyst. Los analistas creados por el sistema no pasan por el flujo de verificación de correo y el método `hasVerifiedEmail()` del modelo `User` devuelve `true` automáticamente para este rol.
+</Warning>
+
+## La puerta KYC para merchants (`EnsureKycApproved`)
+
+El proceso de incorporación de un comerciante tiene dos etapas: primero completa su perfil de empresa; luego, un analista revisa y aprueba su RUT. Mientras el campo `kyc_status` de `CompanyProfile` no sea `'approved'`, el merchant no puede acceder al dashboard ni a ninguna funcionalidad de gestión.
+
+```php title="app/Http/Middleware/EnsureKycApproved.php"
+class EnsureKycApproved
+{
+    public function handle(Request $request, Closure $next)
+    {
+        $user = Auth::user();
+        if ($user && $user->isMerchant()) {
+            if (!$user->companyProfile) {
+                return redirect()->route('merchant.profile')
+                    ->with('info', 'Por favor completa la configuración de tu perfil comercial.');
+            }
+            if ($user->companyProfile->kyc_status !== 'approved') {
+                return redirect()->route('merchant.profile')
+                    ->with('error', 'Tu cuenta está bajo revisión o no ha sido aprobada. '
+                        . 'Por favor espera a que un Analista valide tu RUT.');
+            }
+        }
+        return $next($request);
+    }
+}
+```
+
+El middleware se aplica como una capa adicional dentro del grupo `merchant`:
+
+```php title="routes/web.php — grupo KYC del merchant"
+Route::middleware(['auth', 'verified', 'role:merchant'])
+    ->prefix('merchant')
+    ->name('merchant.')
+    ->group(function () {
+
+    // Rutas de onboarding (sin KYC): accesibles antes de la aprobación
+    Route::get('/profile',  [MerchantController::class, 'onboardingProfile'])->name('profile');
+    Route::post('/profile', [MerchantController::class, 'storeProfile'])->name('profile.store');
+
+    // Rutas operativas (con KYC): solo después de la aprobación
+    Route::middleware([EnsureKycApproved::class])->group(function () {
+        Route::get('/dashboard', [MerchantController::class, 'dashboard'])->name('dashboard');
+        Route::get('/products',  [MerchantController::class, 'products'])->name('products');
+        // ...resto de rutas de merchant
+    });
+});
+```
+
+### Estados posibles de KYC
+
+| Estado (`kyc_status`) | Significado | Acceso al dashboard |
+|---|---|:---:|
+| `pending` | El analista aún no ha revisado el RUT | ❌ |
+| `rejected` | El analista rechazó el documento | ❌ |
+| `approved` | El analista aprobó el RUT | ✅ |
+
+## Exención de verificación de correo para analistas
+
+El modelo `User` implementa la interfaz `MustVerifyEmail` de Laravel. Sin embargo, para los analistas esa verificación no tiene sentido porque sus cuentas las crea directamente otro analista desde el panel de administración. El método `hasVerifiedEmail()` está sobrescrito para devolver siempre `true` cuando el rol es `analyst`:
+
+```php title="app/Models/User.php — hasVerifiedEmail sobrescrito"
+public function hasVerifiedEmail()
+{
+    // Los analistas se crean internamente; no necesitan verificar su correo
+    if ($this->isAnalyst()) {
+        return true;
+    }
+    return ! is_null($this->email_verified_at);
+}
+```
+
+<Tip>
+  Si en el futuro creas un analista manualmente desde la base de datos o con un seeder, no necesitas enviar un correo de verificación ni marcar `email_verified_at`. El sistema lo tratará como verificado automáticamente.
+</Tip>
+
+## Flujo de autenticación y redirección por rol
+
+Después de un inicio de sesión exitoso, `AuthController::redirectByRole()` envía a cada usuario a su destino correspondiente:
+
+<Steps>
+  <Step title="Verificar el correo">
+    Si `hasVerifiedEmail()` devuelve `false`, el usuario es redirigido a la pantalla de verificación, independientemente de su rol (salvo analysts, que siempre pasan).
+  </Step>
+  <Step title="Merchant sin perfil">
+    Si el merchant aún no ha creado su `CompanyProfile`, se le redirige directamente a `merchant.profile` para que complete el onboarding.
+  </Step>
+  <Step title="Redirección al dashboard">
+    - `merchant` con perfil → `merchant.dashboard`
+    - `analyst` → `analyst.dashboard`
+    - `consumer` (o cualquier otro) → `consumer.home`
+  </Step>
+</Steps>

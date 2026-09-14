@@ -1,0 +1,80 @@
+---
+title: "Administra cuentas, roles y bloqueos en FusaShop"
+sidebarTitle: "Gestión Usuarios"
+description: "Crea, edita, bloquea o elimina usuarios en FusaShop. Asigna roles de cliente, comerciante o analista y consulta información sensible con responsabilidad."
+---
+
+La gestión de usuarios es responsabilidad exclusiva de los analistas de FusaShop. En `/admin/users` puedes crear cuentas, cambiar roles, bloquear o desbloquear accesos, consultar el RUT de un comerciante y eliminar usuarios cuando sea necesario. Esta página describe cada operación y las precauciones que debes tomar.
+
+## Ver el listado de usuarios
+
+<Steps>
+  <Step title="Abre el módulo">
+    Ve a `/admin/users` desde el panel del analista.
+  </Step>
+  <Step title="Filtra o busca">
+    Usa el buscador para encontrar por nombre, correo o rol. Filtra por estado (activo, bloqueado) o por rol específico.
+  </Step>
+  <Step title="Abre el detalle">
+    Haz clic en un usuario para ver su información completa, historial de pedidos y estado del KYC si aplica.
+  </Step>
+</Steps>
+
+## Crear un usuario
+
+<Steps>
+  <Step title="Inicia el proceso">
+    En `/admin/users` haz clic en **Nuevo usuario** para ir a `/admin/users/create`.
+  </Step>
+  <Step title="Ingresa los datos">
+    Completa nombre, correo y contraseña temporal.
+  </Step>
+  <Step title="Asigna el rol">
+    Elige entre **Cliente**, **Comerciante** o **Analista**. Los comerciantes creados por administrador aún deben completar el KYC.
+  </Step>
+  <Step title="Guarda el usuario">
+    Pulsa **Crear**. El usuario recibirá un correo con sus credenciales iniciales.
+  </Step>
+</Steps>
+
+## Editar, bloquear o eliminar
+
+<Steps>
+  <Step title="Editar datos">
+    Desde el detalle del usuario, haz clic en **Editar** para modificar nombre, correo o rol.
+  </Step>
+  <Step title="Bloquear o desbloquear">
+    Usa el interruptor **Bloqueo** para impedir o restaurar el acceso a la cuenta.
+  </Step>
+  <Step title="Eliminar">
+    Usa **Eliminar usuario** solo cuando sea absolutamente necesario. Esta acción retira la cuenta de la plataforma.
+  </Step>
+</Steps>
+
+<Warning>
+  Bloquear o eliminar un usuario es una acción sensible. Un comerciante bloqueado no podrá procesar pedidos activos y sus clientes verán interrupciones. Documenta el motivo en un ticket de PQRS o registro interno antes de proceder.
+</Warning>
+
+## Consultar el RUT del comerciante
+
+Para revisar el documento tributario de un comerciante:
+
+- Desde el detalle del usuario, haz clic en **Ver RUT**.
+- Se abrirá el documento cargado en `/admin/users/{user}/rut`.
+- Puedes usar esta vista para validar información antes de aprobar o rechazar el KYC.
+
+<Info>
+  El acceso al RUT queda registrado por auditoría. Consulta este documento solo cuando sea estrictamente necesario para tu labor.
+</Info>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Aprobación KYC" icon="id-card" href="/manual/admin/aprobacion-kyc">
+    Aprueba o rechaza documentos de comerciantes.
+  </Card>
+
+  <Card title="Reportes" icon="file-chart-column" href="/manual/admin/reportes">
+    Analiza la actividad de la plataforma.
+  </Card>
+</CardGroup>

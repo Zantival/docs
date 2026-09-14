@@ -1,0 +1,66 @@
+---
+title: "Sigue el estado de tus pedidos y descarga recibos"
+sidebarTitle: "Mis Pedidos"
+description: "Consulta tu historial de compras en FusaShop, revisa el estado de cada pedido en tiempo real y descarga los recibos digitales cuando los necesites."
+---
+
+La sección **Mis pedidos** te permite hacer seguimiento de todas tus compras en FusaShop. Desde `/shop/orders` puedes ver el historial completo, revisar el estado actual de cada pedido, consultar los productos incluidos y descargar el recibo digital. Esta página explica cómo funciona cada estado y qué acciones puedes tomar.
+
+## Ver tu historial de pedidos
+
+<Steps>
+  <Step title="Abre mis pedidos">
+    Ve a `/shop/orders` desde el menú de tu cuenta.
+  </Step>
+  <Step title="Revisa la lista">
+    Los pedidos aparecen ordenados por fecha, más recientes primero. Cada tarjeta muestra el número de pedido, fecha, total y estado actual.
+  </Step>
+  <Step title="Abre el detalle">
+    Haz clic en cualquier pedido para ver los productos incluidos, la dirección de envío y el desglose del pago.
+  </Step>
+  <Step title="Descarga el recibo">
+    Desde el detalle, pulsa **Descargar recibo** para acceder al comprobante en `/shop/orders/{id}/receipt`.
+  </Step>
+</Steps>
+
+## Estados de un pedido
+
+Cada pedido pasa por varios estados desde su creación hasta su entrega.
+
+<AccordionGroup>
+  <Accordion title="Pendiente">
+    El pedido fue creado y el pago está siendo verificado por PayU. No requiere acción de tu parte.
+  </Accordion>
+
+  <Accordion title="En preparación">
+    El comerciante confirmó el pago y está preparando tu pedido para el envío. Este suele ser el paso más largo.
+  </Accordion>
+
+  <Accordion title="Enviado">
+    El comerciante despachó el pedido. Si el envío incluye guía, la verás en el detalle.
+  </Accordion>
+
+  <Accordion title="Entregado">
+    El pedido llegó a la dirección indicada. Este estado habilita la opción de [dejar reseña](/manual/cliente/reseñas).
+  </Accordion>
+
+  <Accordion title="Cancelado">
+    El pedido fue cancelado, ya sea por ti, por el comerciante o por rechazo del pago. Si aplicaba reembolso, lo verás reflejado por PayU.
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+  Si el estado de tu pedido no cambia por varios días, contacta al comerciante mediante el [chat](/manual/soporte/chat) o abre un ticket de [PQRS](/manual/soporte/pqrs).
+</Tip>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Dejar reseña" icon="star" href="/manual/cliente/reseñas">
+    Califica productos entregados.
+  </Card>
+
+  <Card title="Contactar soporte" icon="headset" href="/manual/soporte/pqrs">
+    Reporta un problema con un pedido.
+  </Card>
+</CardGroup>

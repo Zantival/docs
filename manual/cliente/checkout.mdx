@@ -1,0 +1,57 @@
+---
+title: "Finaliza tu compra y paga tu pedido con PayU"
+sidebarTitle: "Checkout"
+description: "Completa el checkout en FusaShop: confirma productos, ingresa la dirección de envío, elige tu método de pago y recibe el recibo digital al instante."
+---
+
+El checkout es el paso final para convertir tu carrito en un pedido confirmado. En FusaShop este proceso incluye la revisión de productos, la captura de tu dirección de envío, la selección del método de pago con PayU y la confirmación final. Al terminar recibirás un recibo digital que puedes consultar en tu historial.
+
+<Info>
+  FusaShop usa **PayU** como pasarela de pago. Todas las transacciones se procesan en pesos colombianos (COP) y aceptan tarjetas de crédito, débito y otros métodos habilitados por PayU en Colombia.
+</Info>
+
+## Completa tu compra paso a paso
+
+<Steps>
+  <Step title="Abre el checkout">
+    Desde `/shop/cart`, haz clic en **Ir al checkout**. Serás llevado a `/shop/checkout`.
+  </Step>
+  <Step title="Revisa los productos">
+    Verifica que los artículos, cantidades y precios en pesos colombianos sean correctos. Si algo cambió, vuelve al carrito para ajustarlo.
+  </Step>
+  <Step title="Ingresa tu dirección de envío">
+    Completa nombre de destinatario, dirección, ciudad, departamento y teléfono de contacto. Puedes guardar la dirección para próximas compras.
+  </Step>
+  <Step title="Selecciona el método de pago">
+    Elige la opción habilitada por PayU: tarjeta de crédito, débito PSE u otras alternativas disponibles.
+  </Step>
+  <Step title="Confirma el pedido">
+    Revisa el resumen final con el total y haz clic en **Pagar ahora**. Serás redirigido a PayU para completar la transacción.
+  </Step>
+  <Step title="Recibe la confirmación">
+    Al aprobarse el pago, volverás a FusaShop con tu pedido creado y verás el recibo en pantalla.
+  </Step>
+</Steps>
+
+<Warning>
+  No cierres ni recargues la ventana mientras estés en la pasarela de PayU. Espera a que el proceso termine y te devuelva a FusaShop para evitar cargos duplicados.
+</Warning>
+
+## Consultar el recibo
+
+Cada compra genera un recibo con el detalle del pedido.
+
+- Desde el mensaje de confirmación, haz clic en **Ver recibo**.
+- Más tarde puedes descargarlo desde `/shop/orders/{id}/receipt` en la sección **Mis pedidos**.
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Mis pedidos" icon="box" href="/manual/cliente/mis-pedidos">
+    Revisa el estado del pedido que acabas de crear.
+  </Card>
+
+  <Card title="Dejar reseña" icon="star" href="/manual/cliente/reseñas">
+    Comparte tu opinión sobre los productos comprados.
+  </Card>
+</CardGroup>

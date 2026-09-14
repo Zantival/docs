@@ -1,0 +1,70 @@
+---
+title: "Revisa y aprueba el KYC de los comerciantes"
+sidebarTitle: "Aprobación KYC"
+description: "Valida los documentos RUT de los comerciantes de FusaShop, aprueba o rechaza el KYC y notifica automáticamente el resultado a la MiPyme solicitante."
+---
+
+El proceso KYC (Know Your Customer) es la validación con la que FusaShop confirma que un comerciante es un negocio real y legítimo antes de habilitarlo para vender. Como analista, tu labor consiste en revisar el documento RUT que cargó cada solicitante, comparar los datos con el perfil ingresado y aprobar o rechazar la solicitud. Esta página describe el flujo.
+
+<Note>
+  Un comerciante con KYC no aprobado puede crear su perfil y contactar soporte, pero no puede acceder al dashboard completo, publicar productos, recibir pedidos ni solicitar banners.
+</Note>
+
+## Revisar una solicitud KYC
+
+<Steps>
+  <Step title="Localiza al comerciante">
+    Ve a `/admin/users` y filtra por rol **Comerciante** y estado KYC **Pendiente**.
+  </Step>
+  <Step title="Abre el detalle del usuario">
+    Haz clic sobre el comerciante para ver los datos de su MiPyme: nombre comercial, NIT, dirección y categoría.
+  </Step>
+  <Step title="Consulta el RUT">
+    Pulsa **Ver RUT** para abrir el documento cargado en `/admin/users/{user}/rut`.
+  </Step>
+  <Step title="Valida la información">
+    Compara los datos del RUT con los ingresados en el perfil. Verifica que el nombre, NIT y régimen coincidan.
+  </Step>
+  <Step title="Aprueba o rechaza">
+    En el formulario KYC, selecciona **Aprobar** o **Rechazar** y guarda. Si rechazas, agrega un motivo claro para que el comerciante pueda corregirlo.
+  </Step>
+</Steps>
+
+<Warning>
+  Aprobar un KYC habilita al comerciante para vender en la plataforma. Verifica cuidadosamente cada documento antes de dar el visto bueno. Un dato falso o incoherente debe ser causal de rechazo.
+</Warning>
+
+## Notificación automática al comerciante
+
+Al guardar la decisión, el sistema envía una notificación al comerciante:
+
+- Si fue **aprobado**, verá el mensaje de bienvenida al panel completo y podrá comenzar a publicar productos.
+- Si fue **rechazado**, recibirá el motivo y podrá volver a cargar el RUT corregido en `/merchant/profile`.
+
+## Buenas prácticas
+
+<AccordionGroup>
+  <Accordion title="Cotejar datos con el RUT">
+    El nombre comercial, NIT y régimen tributario del formulario deben coincidir exactamente con los del documento. Cualquier diferencia amerita rechazo.
+  </Accordion>
+
+  <Accordion title="RUT vigente">
+    Confirma que el RUT esté actualizado. Documentos antiguos con datos desactualizados no son aceptables.
+  </Accordion>
+
+  <Accordion title="Motivo claro en rechazos">
+    Si rechazas, escribe un motivo específico y accionable: "El NIT del formulario no coincide con el del RUT" es útil; "Datos incorrectos" no lo es.
+  </Accordion>
+</AccordionGroup>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Gestión de usuarios" icon="users-gear" href="/manual/admin/gestion-usuarios">
+    Administra cuentas y roles.
+  </Card>
+
+  <Card title="Reportes" icon="file-chart-column" href="/manual/admin/reportes">
+    Analiza métricas de la plataforma.
+  </Card>
+</CardGroup>

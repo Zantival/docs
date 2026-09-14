@@ -1,0 +1,60 @@
+---
+title: "Gestiona tu carrito de compras en FusaShop"
+sidebarTitle: "Mi Carrito"
+description: "Agrega productos al carrito, ajusta cantidades, elimina artículos y consulta el subtotal antes de pasar al checkout en FusaShop."
+---
+
+El carrito de FusaShop guarda los productos que quieres comprar antes de finalizar el pedido. Puedes agregar artículos desde cualquier ficha de producto, modificar la cantidad, eliminar lo que ya no quieras y ver el subtotal actualizado en tiempo real. Esta página cubre todas las acciones disponibles.
+
+<Warning>
+  Debes iniciar sesión con una cuenta de cliente y tener tu correo verificado para usar el carrito. Si intentas agregar sin haber iniciado sesión, serás redirigido a `/login`.
+</Warning>
+
+## Agregar productos al carrito
+
+<Steps>
+  <Step title="Abre la ficha del producto">
+    Desde `/shop/catalog` o `/shop/directory`, haz clic en el producto que te interesa.
+  </Step>
+  <Step title="Selecciona la cantidad">
+    Ajusta el selector de cantidad en la ficha antes de agregar.
+  </Step>
+  <Step title="Agrega al carrito">
+    Haz clic en el botón **Agregar al carrito**. Verás una confirmación y el contador del carrito se actualizará.
+  </Step>
+</Steps>
+
+## Ver y modificar tu carrito
+
+<Steps>
+  <Step title="Abre el carrito">
+    Ve a `/shop/cart` desde el ícono del carrito en la barra superior.
+  </Step>
+  <Step title="Revisa los productos">
+    Verás cada artículo con su imagen, precio unitario, cantidad y subtotal por línea.
+  </Step>
+  <Step title="Ajusta cantidades">
+    Usa los botones **\+** y **-** para modificar la cantidad. El total se recalcula automáticamente.
+  </Step>
+  <Step title="Elimina productos">
+    Haz clic en el ícono de la papelera junto al producto para retirarlo del carrito.
+  </Step>
+</Steps>
+
+<Tip>
+  El stock disponible cambia en tiempo real. Si otro comprador adquiere el último ejemplar mientras estás en tu carrito, verás un aviso al pasar al checkout.
+</Tip>
+
+## Continuar la compra
+
+Cuando tengas todos los productos que deseas, haz clic en **Ir al checkout** para completar el pago.
+
+<CardGroup cols={2}>
+  <Card title="Finalizar compra" icon="credit-card" href="/manual/cliente/checkout">
+    Ingresa dirección, método de pago y confirma tu pedido.
+  </Card>
+
+  <Card title="Mis pedidos" icon="box" href="/manual/cliente/mis-pedidos">
+    Revisa el estado de compras anteriores.
+  </Card>
+</CardGroup>

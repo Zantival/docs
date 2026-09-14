@@ -1,0 +1,67 @@
+---
+title: "Controla el stock y las alertas de inventario"
+sidebarTitle: "Inventario"
+description: "Actualiza las cantidades disponibles de tus productos, define umbrales de alerta de bajo stock y evita quiebres de inventario en tu tienda FusaShop."
+---
+
+El inventario es donde controlas cuántas unidades de cada producto tienes disponibles para la venta en FusaShop. Desde `/merchant/inventory` puedes ver niveles actuales, ajustar cantidades y recibir alertas cuando un artículo esté por agotarse. Esta página te muestra cómo mantener tu stock ordenado.
+
+## Ver niveles de stock
+
+<Steps>
+  <Step title="Abre el inventario">
+    Ve a `/merchant/inventory` desde el menú del panel.
+  </Step>
+  <Step title="Revisa la tabla">
+    Cada fila muestra el producto, la cantidad disponible y un indicador de estado: verde (normal), amarillo (bajo) o rojo (agotado).
+  </Step>
+  <Step title="Filtra o busca">
+    Usa el buscador para encontrar un producto específico o filtra por categoría para revisar grupos completos.
+  </Step>
+</Steps>
+
+## Actualizar cantidades
+
+<Steps>
+  <Step title="Selecciona el producto">
+    Haz clic en el producto que quieres ajustar en la tabla.
+  </Step>
+  <Step title="Ingresa la nueva cantidad">
+    Escribe la cantidad disponible real. Puedes sumar unidades por reabastecimiento o descontar por mermas.
+  </Step>
+  <Step title="Guarda el cambio">
+    Pulsa **Actualizar**. El nuevo nivel se refleja de inmediato en el catálogo público.
+  </Step>
+</Steps>
+
+<Tip>
+  Actualiza el inventario cada vez que recibas mercancía nueva. Un stock desactualizado puede llevar a que un cliente compre un producto que ya no tienes disponible.
+</Tip>
+
+## Alertas de bajo stock
+
+FusaShop marca automáticamente los productos con niveles bajos para que los reabastezcas a tiempo.
+
+- El **panel del comerciante** muestra el total de productos con stock bajo.
+- La **campana de notificaciones** te avisa cuando un producto cae por debajo del umbral.
+- El indicador de estado en la tabla cambia a amarillo o rojo según el nivel.
+
+<Warning>
+  Si un producto llega a 0 unidades, deja de aparecer como disponible en el catálogo. Los clientes no podrán agregarlo al carrito hasta que actualices su stock.
+</Warning>
+
+## Relación con productos
+
+El inventario está ligado a cada producto. Si eliminas un producto desde [Productos](/manual/comerciante/productos), su registro de inventario también se retira.
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Productos" icon="boxes-stacked" href="/manual/comerciante/productos">
+    Agrega o edita artículos de tu catálogo.
+  </Card>
+
+  <Card title="Pedidos" icon="clipboard-list" href="/manual/comerciante/pedidos">
+    Atiende las órdenes recibidas.
+  </Card>
+</CardGroup>

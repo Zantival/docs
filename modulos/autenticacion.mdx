@@ -1,0 +1,370 @@
+---
+title: "Módulo de autenticación: login, registro y OAuth en FusaShop"
+sidebarTitle: "Autenticación"
+description: "Cómo funcionan el registro, el inicio de sesión, la verificación de correo, OAuth con Google y el restablecimiento offline de contraseñas en FusaShop."
+---
+
+El módulo de autenticación de FusaShop gestiona el ciclo de vida completo de la identidad de un usuario: desde el registro inicial con asignación de rol, pasando por el inicio de sesión protegido contra fuerza bruta, hasta la verificación de correo y los flujos alternativos como OAuth con Google o el restablecimiento de contraseña sin acceso a internet. Todo se implementa en `AuthController` y `SocialAuthController`, ubicados en `app/Http/Controllers/Auth/`.
+
+---
+
+## Rutas de autenticación
+
+La siguiente tabla resume todas las rutas del módulo. Las rutas bajo el middleware `guest` sólo son accesibles para usuarios no autenticados.
+
+| Método | URI | Nombre | Middleware |
+|--------|-----|---------|------------|
+| `GET` | `/login` | `login` | `guest` |
+| `POST` | `/login` | `login.post` | `guest`, `throttle:5,1` |
+| `GET` | `/register` | `register` | `guest` |
+| `POST` | `/register` | `register.post` | `guest`, `throttle:5,1` |
+| `POST` | `/logout` | `logout` | `auth` |
+| `GET` | `/auth/{provider}/redirect` | `social.redirect` | `guest` |
+| `GET` | `/auth/{provider}/callback` | `social.callback` | `guest` |
+| `GET` | `/email/verify` | `verification.notice` | `auth` |
+| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, `signed` |
+| `POST` | `/email/verification-notification` | `verification.send` | `auth`, `throttle:6,1` |
+| `GET` | `/forgot-password-offline` | `password.request.offline` | `guest` |
+| `POST` | `/forgot-password-offline` | `password.offline.post` | `guest` |
+
+---
+
+## Flujo de registro (`POST /register`)
+
+El registro acepta consumidores (`consumer`) y comerciantes (`merchant`). Al completarse con éxito, la sesión se inicia automáticamente y se redirige al usuario según su rol.
+
+<Steps>
+  <Step title="Validar los datos">
+    El controlador valida nombre, correo único, contraseña confirmada (mínimo 8 caracteres), rol y teléfono opcional.
+  </Step>
+  <Step title="Crear el usuario">
+    Se crea el registro en `users` con la contraseña hasheada mediante `Hash::make()`. El nombre pasa por `strip_tags()` para prevenir XSS.
+  </Step>
+  <Step title="Crear el carrito (solo consumidores)">
+    Si el nuevo usuario es consumidor, se crea automáticamente un registro en la tabla `carts` vinculado a su `user_id`.
+  </Step>
+  <Step title="Disparar notificaciones">
+    Se emite el evento `Registered` de Laravel para enviar el correo de verificación, se envía una `WelcomeNotification` al usuario y se envía una `NewUserNotification` a todos los analistas.
+  </Step>
+  <Step title="Iniciar sesión y redirigir">
+    Se llama a `Auth::login($user)`, se regenera la sesión y se redirige según el rol.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php AuthController.php - register()
+public function register(Request $request)
+{
+    $data = $request->validate([
+        'name'     => ['required', 'string', 'max:255'],
+        'email'    => ['required', 'email', 'unique:users'],
+        'password' => ['required', 'confirmed', Password::min(8)],
+        'role'     => ['required', 'in:consumer,merchant'],
+        'phone'    => ['nullable', 'string', 'max:20'],
+    ]);
+
+    $user = User::create([
+        'name'     => strip_tags($data['name']),
+        'email'    => $data['email'],
+        'password' => Hash::make($data['password']),
+        'role'     => $data['role'],
+        'phone'    => $data['phone'] ?? null,
+    ]);
+
+    if ($user->isConsumer()) {
+        Cart::create(['user_id' => $user->id]);
+    }
+
+    try {
+        event(new \Illuminate\Auth\Events\Registered($user));
+        $user->notify(new \App\Notifications\WelcomeNotification());
+
+        $analysts = User::where('role', 'analyst')->get();
+        foreach ($analysts as $analyst) {
+            $analyst->notify(new \App\Notifications\NewUserNotification($user));
+        }
+    } catch (\Exception $e) {
+        \Illuminate\Support\Facades\Log::error(
+            'Error enviando correos durante el registro: ' . $e->getMessage()
+        );
+    }
+
+    Auth::login($user);
+    $request->session()->regenerate();
+
+    return $this->redirectByRole($user);
+}
+```
+</CodeGroup>
+
+<Note>
+  El bloque `try/catch` alrededor del envío de notificaciones garantiza que un fallo de correo no interrumpa el registro. El error queda registrado en el log de Laravel.
+</Note>
+
+---
+
+## Flujo de inicio de sesión (`POST /login`)
+
+El endpoint `login.post` tiene un límite de **5 intentos por minuto** gracias al middleware `throttle:5,1`. Tras autenticarse, se verifica si la cuenta está bloqueada antes de redirigir.
+
+<Steps>
+  <Step title="Validar credenciales">
+    Se validan `email` y `password`. Si `Auth::attempt()` falla, se devuelve el error `Credenciales incorrectas.` usando `withErrors`.
+  </Step>
+  <Step title="Verificar bloqueo">
+    Inmediatamente después de un intento exitoso se comprueba `Auth::user()->is_blocked`. Si es `true`, la sesión se cierra y se invalida antes de mostrar el error.
+  </Step>
+  <Step title="Regenerar sesión y redirigir">
+    Se llama a `$request->session()->regenerate()` para prevenir fijación de sesión y luego se delega en `redirectByRole()`.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php AuthController.php - login()
+public function login(Request $request)
+{
+    $credentials = $request->validate([
+        'email'    => ['required', 'email'],
+        'password' => ['required'],
+    ]);
+
+    if (Auth::attempt($credentials, $request->boolean('remember'))) {
+        $request->session()->regenerate();
+
+        if (Auth::user()->is_blocked) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+            return back()
+                ->withErrors(['email' => 'Tu cuenta ha sido bloqueada. Contacta al administrador.'])
+                ->onlyInput('email');
+        }
+
+        return $this->redirectByRole(Auth::user());
+    }
+
+    return back()->withErrors(['email' => 'Credenciales incorrectas.'])->onlyInput('email');
+}
+```
+</CodeGroup>
+
+### Lógica de redirección por rol
+
+El método privado `redirectByRole()` centraliza todas las redirecciones post-login. Si el correo no está verificado, **siempre** redirige a la pantalla de verificación, sin importar el rol.
+
+```php AuthController.php - redirectByRole()
+private function redirectByRole(User $user)
+{
+    if (! $user->hasVerifiedEmail()) {
+        return redirect()->route('verification.notice');
+    }
+
+    if ($user->role === 'merchant') {
+        if (!$user->companyProfile) {
+            return redirect()->intended(route('merchant.profile'));
+        }
+        return redirect()->intended(route('merchant.dashboard'));
+    }
+
+    return match ($user->role) {
+        'analyst' => redirect()->intended(route('analyst.dashboard')),
+        default   => redirect()->intended(route('consumer.home')),
+    };
+}
+```
+
+<Tabs>
+  <Tab title="consumer">
+    Redirige a `consumer.home` (`/shop/`).
+  </Tab>
+  <Tab title="merchant">
+    Si aún no tiene perfil de empresa, va a `merchant.profile` para el onboarding. Si ya lo tiene, va al `merchant.dashboard`.
+  </Tab>
+  <Tab title="analyst">
+    Redirige directamente a `analyst.dashboard` (`/admin/dashboard`).
+  </Tab>
+</Tabs>
+
+---
+
+## Cierre de sesión (`POST /logout`)
+
+El método `logout` invalida la sesión, regenera el token CSRF y redirige a `/login`. El middleware `auth` garantiza que sólo usuarios autenticados puedan llamar este endpoint.
+
+```php AuthController.php - logout()
+public function logout(Request $request)
+{
+    Auth::logout();
+    $request->session()->invalidate();
+    $request->session()->regenerateToken();
+    return redirect()->route('login');
+}
+```
+
+<Warning>
+  Usa siempre `POST` para cerrar sesión. Una solicitud `GET` sería vulnerable a ataques CSRF de cierre de sesión forzado.
+</Warning>
+
+---
+
+## OAuth con Google (Socialite)
+
+FusaShop integra Laravel Socialite para inicio de sesión social. Actualmente sólo Google está configurado como proveedor, pero la arquitectura acepta cualquier driver de Socialite mediante el parámetro `{provider}` en la ruta.
+
+<Steps>
+  <Step title="Redirigir al proveedor">
+    `GET /auth/{provider}/redirect` llama a `Socialite::driver($provider)->redirect()` y envía al usuario a la pantalla de consentimiento de Google.
+  </Step>
+  <Step title="Procesar el callback">
+    `GET /auth/{provider}/callback` recibe el código de autorización. Si el correo ya existe en `users`, se actualiza el `provider_id` si estaba vacío y se inicia sesión.
+  </Step>
+  <Step title="Crear cuenta nueva (si aplica)">
+    Si el correo no existe, se crea un usuario con `role = 'consumer'` y `password = null`. Se crea su carrito automáticamente y se inicia sesión con `remember = true`.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php SocialAuthController.php - redirect()
+public function redirect($provider)
+{
+    return Socialite::driver($provider)->redirect();
+}
+```
+
+```php SocialAuthController.php - callback()
+public function callback($provider)
+{
+    try {
+        $socialUser = Socialite::driver($provider)->user();
+
+        $user = User::where('email', $socialUser->getEmail())->first();
+
+        if ($user) {
+            if (!$user->provider_id) {
+                $user->update([
+                    'provider'    => $provider,
+                    'provider_id' => $socialUser->getId(),
+                ]);
+            }
+            Auth::login($user, true);
+            return $this->redirectByRole($user);
+        }
+
+        $newUser = User::create([
+            'name'        => $socialUser->getName() ?? 'Usuario',
+            'email'       => $socialUser->getEmail(),
+            'provider'    => $provider,
+            'provider_id' => $socialUser->getId(),
+            'role'        => 'consumer',
+            'password'    => null,
+        ]);
+
+        Cart::create(['user_id' => $newUser->id]);
+
+        Auth::login($newUser, true);
+        return redirect()->route('consumer.home')
+            ->with('success', '¡Cuenta creada exitosamente con ' . ucfirst($provider) . '!');
+
+    } catch (\Exception $e) {
+        return redirect()->route('login')
+            ->withErrors(['email' => 'No se pudo iniciar sesión con ' . ucfirst($provider) . '. ' . $e->getMessage()]);
+    }
+}
+```
+</CodeGroup>
+
+<Info>
+  Los usuarios creados mediante OAuth no tienen contraseña (`password = null`). Si más adelante necesitan una, deben solicitarla a través del flujo de restablecimiento offline o contactar a un analista.
+</Info>
+
+---
+
+## Verificación de correo electrónico
+
+FusaShop usa el sistema de verificación nativo de Laravel. Tras el registro, el evento `Registered` dispara el envío automático del enlace firmado.
+
+| Ruta | Descripción |
+|------|-------------|
+| `GET /email/verify` (`verification.notice`) | Pantalla que indica que el correo no está verificado |
+| `GET /email/verify/{id}/{hash}` (`verification.verify`) | Enlace firmado que llama a `$request->fulfill()` |
+| `POST /email/verification-notification` (`verification.send`) | Reenvía el correo de verificación (máx. 6 veces/min) |
+
+```php routes/web.php - verificación
+Route::get('/email/verify/{id}/{hash}', function (EmailVerificationRequest $request) {
+    $request->fulfill();
+    return redirect()->route('consumer.home');
+})->middleware(['auth', 'signed'])->name('verification.verify');
+```
+
+<Note>
+  El middleware `signed` valida la firma criptográfica de la URL. Si el enlace fue manipulado o expiró, Laravel retorna un error `403`.
+</Note>
+
+---
+
+## Restablecimiento offline de contraseña
+
+Este flujo existe para usuarios que **no tienen acceso a internet** o cuya cuenta fue creada por un analista sin correo propio. En lugar de enviar un enlace de reset, crea una solicitud que los analistas atienden manualmente.
+
+<Steps>
+  <Step title="Solicitar el restablecimiento">
+    El usuario ingresa su correo en `GET /forgot-password-offline`. Si el correo existe en `users`, se crea un registro en `password_reset_offline_requests`.
+  </Step>
+  <Step title="Notificar a analistas">
+    Se envía una `OfflinePasswordResetRequested` a todos los usuarios con `role = 'analyst'`.
+  </Step>
+  <Step title="Atención manual">
+    Un analista contacta al usuario y actualiza la contraseña desde el panel de administración.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php AuthController.php - processOfflinePasswordRequest()
+public function processOfflinePasswordRequest(Request $request)
+{
+    $request->validate([
+        'email' => ['required', 'email', 'exists:users,email'],
+    ], [
+        'email.exists' => 'No encontramos ninguna cuenta con ese correo electrónico.',
+    ]);
+
+    $user = User::where('email', $request->email)->first();
+
+    \App\Models\PasswordResetOfflineRequest::create([
+        'email' => $request->email,
+    ]);
+
+    $analysts = User::where('role', 'analyst')->get();
+    foreach ($analysts as $analyst) {
+        $analyst->notify(new \App\Notifications\OfflinePasswordResetRequested($user));
+    }
+
+    return back()->with('success',
+        'Se ha notificado a nuestros analistas. Pronto se pondrán en contacto para restablecer tu contraseña.'
+    );
+}
+```
+</CodeGroup>
+
+<Tip>
+  Si eres analista y recibes esta notificación, ve a **Admin → Usuarios**, busca el correo y actualiza la contraseña desde el formulario de edición de usuario.
+</Tip>
+
+---
+
+## Resumen de componentes involucrados
+
+<CardGroup cols={2}>
+  <Card title="AuthController" icon="key" href="/modulos/autenticacion">
+    Gestiona registro, login, logout y restablecimiento offline. Ubicado en `app/Http/Controllers/Auth/AuthController.php`.
+  </Card>
+  <Card title="SocialAuthController" icon="google" href="/integraciones/socialite">
+    Maneja el flujo OAuth con Socialite. Ubicado en `app/Http/Controllers/Auth/SocialAuthController.php`.
+  </Card>
+  <Card title="Roles y Permisos" icon="envelope" href="/introduccion/roles-y-permisos">
+    Consulta los roles disponibles (`consumer`, `merchant`, `analyst`) y cómo afectan la redirección post-login.
+  </Card>
+  <Card title="Panel Analista" icon="bell" href="/modulos/panel-analista">
+    Los analistas atienden las solicitudes de restablecimiento offline y gestionan contraseñas desde el panel de administración.
+  </Card>
+</CardGroup>

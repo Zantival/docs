@@ -1,0 +1,261 @@
+---
+title: "Integra PayU Latam como pasarela de pagos en FusaShop"
+sidebarTitle: "PayU"
+description: "Configura PayU Latam en FusaShop: variables de entorno, flujo WebCheckout, respuesta al comprador y webhook servidor a servidor para confirmar pedidos."
+---
+
+FusaShop utiliza **PayU Latam** como pasarela de pago para procesar los pedidos de los consumidores. La integración se basa en el modelo de redirección web (WebCheckout): el cliente completa el pago en el sitio seguro de PayU y luego regresa a FusaShop a través de dos URLs de retorno: una para mostrarle el resultado visual al comprador (`responseUrl`) y otra de confirmación servidor-a-servidor (`confirmationUrl`, también llamada webhook). La clase `PayUService` construye todos los parámetros del formulario de pago, incluida la firma HMAC-MD5, mientras que `PaymentController` maneja las respuestas.
+
+## Variables de entorno requeridas
+
+Agrega las siguientes claves a tu archivo `.env` antes de poner la integración en producción. Los valores de sandbox que trae el código por defecto solo son válidos para pruebas.
+
+```ini title=".env"
+PAYU_MERCHANT_ID=508029
+PAYU_API_KEY=4Vj8eK4r98P846E
+PAYU_ACCOUNT_ID=512321
+PAYU_TEST=1          # 1 = sandbox, 0 = producción
+```
+
+Luego registra el bloque `payu` en `config/services.php`:
+
+```php title="config/services.php"
+'payu' => [
+    'merchant_id' => env('PAYU_MERCHANT_ID', '508029'),
+    'api_key'     => env('PAYU_API_KEY',     '4Vj8eK4r98P846E'),
+    'account_id'  => env('PAYU_ACCOUNT_ID',  '512321'),
+    'test'        => env('PAYU_TEST', 1),
+],
+```
+
+<Warning>
+  Nunca confirmes los valores de producción de `PAYU_API_KEY` en el repositorio.
+  Añade `.env` a tu `.gitignore` y usa variables de entorno del servidor en producción.
+</Warning>
+
+## Rutas registradas
+
+Las dos rutas de retorno son nombradas por `PayUService` al construir los parámetros del formulario. Asegúrate de registrarlas en `routes/web.php`:
+
+```php title="routes/web.php"
+use App\Http\Controllers\PaymentController;
+
+Route::get('/payment/response', [PaymentController::class, 'response'])
+    ->name('payment.response');
+
+Route::post('/payment/webhook', [PaymentController::class, 'webhook'])
+    ->name('payment.webhook');
+```
+
+<Note>
+  La ruta del webhook (`payment.webhook`) debe estar **excluida** de la protección CSRF
+  porque PayU envía un `POST` externo sin token de sesión. Agrégala al array
+  `$except` de `App\Http\Middleware\VerifyCsrfToken`.
+</Note>
+
+## Flujo completo de pago
+
+El siguiente diagrama describe los pasos que ocurren desde que el comprador confirma su pedido hasta que FusaShop lo marca como pagado y le envía el recibo por correo.
+
+<Steps>
+  <Step title="El consumidor confirma el checkout">
+    El consumidor revisa su carrito y hace clic en **Pagar**. El controlador
+    `ConsumerController::checkoutProcess()` crea el registro `Order` en la base
+    de datos con `payment_status = 'pending'`.
+  </Step>
+
+  <Step title="PayUService genera los parámetros del formulario">
+    `PayUService::getCheckoutParams($order)` construye el array con todos los
+    campos que necesita el formulario POST de PayU WebCheckout, incluyendo la
+    firma MD5 y la referencia con formato `ORDER-{id}-{timestamp}`.
+
+    ```php title="app/Services/PayUService.php"
+    public function getCheckoutParams($order)
+    {
+        $reference = "ORDER-{$order->id}-" . time();
+
+        return [
+            'merchantId'      => $this->merchantId,
+            'accountId'       => $this->accountId,
+            'description'     => "Compra en FusaShop - Pedido #{$order->id}",
+            'referenceCode'   => $reference,
+            'amount'          => $order->total,
+            'tax'             => 0,
+            'taxReturnBase'   => 0,
+            'currency'        => 'COP',
+            'signature'       => $this->generateSignature($reference, $order->total, 'COP'),
+            'test'            => $this->test,
+            'buyerEmail'      => $order->user->email,
+            'responseUrl'     => route('payment.response'),
+            'confirmationUrl' => route('payment.webhook'),
+            'url'             => $this->url,
+        ];
+    }
+    ```
+
+    La firma se calcula así:
+
+    ```php title="app/Services/PayUService.php"
+    public function generateSignature($reference, $amount, $currency)
+    {
+        $amountFormatted = number_format($amount, 0, '.', '');
+        $signatureString = "{$this->apiKey}~{$this->merchantId}~{$reference}~{$amountFormatted}~{$currency}";
+        return md5($signatureString);
+    }
+    ```
+  </Step>
+
+  <Step title="Redirección a PayU WebCheckout">
+    La vista del checkout construye un formulario HTML con los parámetros
+    anteriores y redirige automáticamente al usuario al portal de pago de PayU
+    (sandbox o producción, según `PAYU_TEST`).
+  </Step>
+
+  <Step title="El comprador paga en PayU">
+    El usuario completa el pago con tarjeta, PSE u otro medio disponible en la
+    interfaz segura de PayU. PayU valida la transacción.
+  </Step>
+
+  <Step title="Redirección de respuesta al frontend (PaymentController::response)">
+    PayU redirige al navegador del comprador a `responseUrl` con parámetros GET.
+    `PaymentController::response()` lee el estado y muestra la vista
+    `payment.result`:
+
+    ```php title="app/Http/Controllers/PaymentController.php"
+    public function response(Request $request)
+    {
+        $state     = $request->get('transactionState');
+        $reference = $request->get('referenceCode');
+
+        $status  = 'pending';
+        $message = 'Tu pago está siendo procesado.';
+
+        if ($state == 4) {
+            $status  = 'success';
+            $message = '¡Pago aprobado con éxito! Gracias por tu compra.';
+        } elseif ($state == 6) {
+            $status  = 'error';
+            $message = 'El pago fue rechazado. Intenta con otro medio.';
+        }
+
+        return view('payment.result', compact('status', 'message', 'reference'));
+    }
+    ```
+
+    | `transactionState` | Significado | `$status` devuelto |
+    |--------------------|-------------|-------------------|
+    | `4`                | Aprobado    | `success`         |
+    | `6`                | Rechazado   | `error`           |
+    | `7`                | Pendiente   | `pending`         |
+    | `104`              | Error       | `pending`         |
+
+    <Info>
+      Este endpoint es **solo visual**: muestra un mensaje al comprador pero **no**
+      actualiza la base de datos. La actualización real ocurre en el webhook.
+    </Info>
+  </Step>
+
+  <Step title="Confirmación webhook servidor-a-servidor (PaymentController::webhook)">
+    PayU envía un `POST` a `confirmationUrl` de forma independiente al navegador
+    del comprador. Este es el canal confiable para actualizar el estado del pedido:
+
+    ```php title="app/Http/Controllers/PaymentController.php"
+    public function webhook(Request $request)
+    {
+        Log::info('PayU Webhook received', $request->all());
+
+        $reference = $request->post('reference_sale'); // "ORDER-{id}-{timestamp}"
+        $state     = $request->post('state_pol');       // 4 = Aprobado
+        $value     = $request->post('value');
+
+        // Extraer el ID del pedido de la referencia
+        $parts = explode('-', $reference);
+        if (isset($parts[1])) {
+            $orderId = $parts[1];
+            $order   = Order::find($orderId);
+
+            if ($order) {
+                if ($state == 4) {
+                    $order->update([
+                        'payment_status' => 'paid',
+                        'status'         => 'processing',
+                    ]);
+
+                    // Enviar recibo por correo electrónico
+                    try {
+                        Mail::to($order->user->email)
+                            ->send(new OrderReceipt($order->load('items.product', 'user')));
+                    } catch (\Exception $e) {
+                        Log::error('Error sending receipt email: ' . $e->getMessage());
+                    }
+                } elseif ($state == 6 || $state == 5) {
+                    $order->update(['payment_status' => 'failed']);
+                }
+            }
+        }
+
+        return response('OK', 200);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Lógica del webhook en detalle
+
+<CardGroup cols={2}>
+  <Card title="Formato de referencia" icon="tag">
+    La referencia del pedido sigue el formato `ORDER-{id}-{timestamp}`, por
+    ejemplo `ORDER-42-1716300000`. El webhook extrae el `id` haciendo
+    `explode('-', $reference)[1]`.
+  </Card>
+  <Card title="Estados de state_pol" icon="circle-check">
+    `state_pol = 4` → aprobado: actualiza a `paid` + `processing` y envía
+    correo. `state_pol = 5` o `6` → fallido: actualiza a `failed`. Otros
+    estados se ignoran silenciosamente.
+  </Card>
+  <Card title="Correo OrderReceipt" icon="envelope">
+    Solo se envía cuando `state_pol == 4`. Se carga la relación
+    `items.product` y `user` para incluir el detalle completo del pedido en
+    el mailable `App\Mail\OrderReceipt`.
+  </Card>
+  <Card title="Logging" icon="file-lines">
+    Cada petición webhook se registra con `Log::info('PayU Webhook received',
+    $request->all())`. Los errores de envío de correo se registran con
+    `Log::error(...)` sin interrumpir la respuesta `OK` a PayU.
+  </Card>
+</CardGroup>
+
+## Firma de seguridad
+
+PayU verifica cada transacción usando una firma MD5 construida con el formato:
+
+```
+md5(ApiKey~merchantId~referenceCode~amount~currency)
+```
+
+<Warning>
+  El campo `amount` en la firma **no debe llevar decimales** en el caso de pesos
+  colombianos (COP). `PayUService::generateSignature()` usa
+  `number_format($amount, 0, '.', '')` para garantizarlo. Si cambias la
+  moneda, revisa la documentación oficial de PayU para el formato correcto.
+</Warning>
+
+## URL de PayU según entorno
+
+| Entorno     | URL WebCheckout |
+|-------------|-----------------|
+| Sandbox     | `https://sandbox.checkout.payulatam.com/checkout/webcheckout.php` |
+| Producción  | `https://checkout.payulatam.com/checkout/webcheckout.php` |
+
+El servicio selecciona la URL automáticamente según el valor de `PAYU_TEST` en `.env`.
+
+## Consideraciones para producción
+
+<Accordion title="Lista de verificación antes de ir a producción">
+  - Cambia `PAYU_TEST=0` en el servidor de producción.
+  - Sustituye las credenciales sandbox por las de tu cuenta real de PayU Latam.
+  - Verifica que `payment.webhook` esté excluido de CSRF en `VerifyCsrfToken`.
+  - Asegúrate de que `confirmationUrl` sea accesible públicamente (no `localhost`).
+  - Configura el mailer de producción (SMTP, Resend, Mailgun, etc.) para que `OrderReceipt` llegue correctamente.
+  - Revisa los logs en `storage/logs/laravel.log` para confirmar que los webhooks se están recibiendo.
+</Accordion>

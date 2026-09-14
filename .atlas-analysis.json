@@ -1,0 +1,94 @@
+{
+  "projectType": "saas",
+  "projectName": "FusaShop",
+  "projectDescription": "Plataforma de comercio electrónico multirol construida con Laravel que permite a consumidores comprar productos, a comerciantes (MiPymes) gestionar su tienda, y a analistas administrar la plataforma con reportes e inteligencia artificial.",
+  "theme": "almond",
+  "primaryColor": "#0071ce",
+  "lightColor": "#ffffff",
+  "darkColor": "#0d1e45",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Manual del Desarrollador",
+        "groups": [
+          {
+            "group": "Introducción",
+            "pages": [
+              "introduccion/descripcion-general",
+              "introduccion/arquitectura",
+              "introduccion/roles-y-permisos"
+            ]
+          },
+          {
+            "group": "Instalación y Configuración",
+            "pages": [
+              "instalacion/requisitos",
+              "instalacion/instalacion-local",
+              "instalacion/variables-de-entorno",
+              "instalacion/base-de-datos"
+            ]
+          },
+          {
+            "group": "Módulos Principales",
+            "pages": [
+              "modulos/autenticacion",
+              "modulos/consumidores",
+              "modulos/comerciantes",
+              "modulos/panel-analista",
+              "modulos/pagos",
+              "modulos/chat",
+              "modulos/pqrs"
+            ]
+          },
+          {
+            "group": "API REST",
+            "pages": [
+              "api/autenticacion-api",
+              "api/productos",
+              "api/carrito",
+              "api/ordenes"
+            ]
+          },
+          {
+            "group": "Integraciones y Análisis",
+            "pages": [
+              "integraciones/payu",
+              "integraciones/socialite",
+              "integraciones/modulo-python"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Sistema de autenticación multirrol (consumidor, comerciante, analista) con soporte OAuth vía Laravel Socialite",
+    "Catálogo de productos con variantes, galería de imágenes y especificaciones técnicas",
+    "Carrito de compras persistente con soporte de opciones combinadas",
+    "Flujo de checkout con integración a pasarela de pagos PayU",
+    "Sistema de puntos de fidelidad (1 punto por cada $1.000 COP gastados, $50 COP de descuento por punto)",
+    "Panel de comerciante con gestión de inventario, pedidos, reseñas y finanzas",
+    "Proceso KYC para comerciantes (carga de RUT y Cámara de Comercio, aprobación por analista)",
+    "Sistema de cupones de descuento (fijo o porcentaje) con límites de uso y caducidad",
+    "Chat en tiempo real con long-polling, filtro de palabrotas e integración de fichas de productos",
+    "PQRS (Peticiones, Quejas, Reclamos y Sugerencias) conforme a normativa colombiana",
+    "Panel de analista con reportes de ventas, usuarios y productos",
+    "Módulo de Machine Learning en Python para clasificación de rendimiento de comerciantes",
+    "API REST con Laravel Sanctum para clientes móviles o de terceros",
+    "Sistema de notificaciones en tiempo real (nuevos pedidos, cambios de estado, mensajes, decisiones KYC)"
+  ],
+  "publicApiSurface": [
+    "POST /api/login — Autenticación, devuelve token Sanctum",
+    "POST /api/register — Registro de usuario (consumer o merchant)",
+    "POST /api/logout — Cierre de sesión (revoca token)",
+    "GET /api/products — Listado paginado de productos activos (filtros: search, category)",
+    "GET /api/products/{id} — Detalle de un producto",
+    "GET /api/cart — Carrito del usuario autenticado",
+    "POST /api/cart — Agregar ítem al carrito",
+    "DELETE /api/cart/{item} — Eliminar ítem del carrito",
+    "GET /api/orders — Historial de pedidos del usuario autenticado",
+    "GET /api/analytics — Datos de analítica (solo analistas)",
+    "POST /payment/response — Respuesta de PayU tras pago (redirect frontend)",
+    "POST /payment/webhook — Webhook servidor-a-servidor de PayU"
+  ]
+}

@@ -1,0 +1,92 @@
+---
+title: "Administra los banners y la publicidad de FusaShop"
+sidebarTitle: "Banners Globales"
+description: "Crea banners de la home de FusaShop, activa o desactiva campañas, revisa solicitudes de comerciantes y actualiza el logo global de la plataforma."
+---
+
+Los banners globales son los espacios publicitarios visibles en la página principal de FusaShop. Como analista, puedes crear banners administrados por la plataforma, revisar las solicitudes que envían los comerciantes y actualizar el logo global del sitio. Esta página cubre las tres tareas desde `/admin/banners`.
+
+<Tabs>
+  <Tab title="Banners propios">
+    ## Crear un banner global
+
+    <Steps>
+      <Step title="Abre la gestión">
+        Ve a `/admin/banners` y haz clic en **Nuevo banner**.
+      </Step>
+      <Step title="Carga la imagen">
+        Selecciona un archivo JPG o PNG con las dimensiones recomendadas para la home.
+      </Step>
+      <Step title="Configura enlace y orden">
+        Ingresa la URL de destino (por ejemplo, una categoría del catálogo) y el orden de aparición. A menor número, mayor prioridad.
+      </Step>
+      <Step title="Activa el banner">
+        Marca la casilla **Activo** y guarda. El banner se publica inmediatamente.
+      </Step>
+    </Steps>
+
+    ## Activar, desactivar o eliminar
+
+    En la lista de `/admin/banners` puedes:
+
+    - **Activar/Desactivar**: usa el interruptor de estado para mostrar u ocultar un banner sin borrarlo.
+    - **Eliminar**: retira el banner de forma permanente. La acción no se puede revertir.
+
+    <Tip>
+      Mantén entre 3 y 5 banners activos para no saturar la home. Rotar el contenido cada semana mejora el interés de los visitantes.
+    </Tip>
+  </Tab>
+  <Tab title="Solicitudes de comerciantes">
+    ## Revisar solicitudes
+
+    Las solicitudes que envían los comerciantes desde `/merchant/banner-request` llegan a tu bandeja para aprobación.
+
+    <Steps>
+      <Step title="Abre la solicitud">
+        En `/admin/banners` selecciona una solicitud pendiente. Serás llevado a `/admin/banner-requests/{id}`.
+      </Step>
+      <Step title="Evalúa el contenido">
+        Revisa la imagen propuesta, la URL de destino y el periodo solicitado.
+      </Step>
+      <Step title="Aprueba o rechaza">
+        Selecciona **Aprobar** para publicar el banner o **Rechazar** ingresando el motivo. El comerciante recibirá una notificación automática.
+      </Step>
+    </Steps>
+
+    <Note>
+      Solo los comerciantes con KYC aprobado pueden enviar solicitudes. Las peticiones de cuentas no verificadas se bloquean automáticamente.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Actualizar el logo global
+
+El logo aparece en la barra superior de todo el sitio.
+
+<Steps>
+  <Step title="Busca la sección de logo">
+    Dentro de `/admin/banners`, ubica el bloque **Logo global**.
+  </Step>
+  <Step title="Carga la nueva imagen">
+    Usa un archivo PNG con fondo transparente para mantener la coherencia visual.
+  </Step>
+  <Step title="Guarda los cambios">
+    Pulsa **Actualizar logo**. El cambio se refleja en toda la plataforma.
+  </Step>
+</Steps>
+
+<Warning>
+  Usa una imagen de máximo 200 KB. Un archivo pesado ralentiza la carga del sitio y afecta la experiencia de los usuarios.
+</Warning>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Gestión de usuarios" icon="users-gear" href="/manual/admin/gestion-usuarios">
+    Modera cuentas y roles.
+  </Card>
+
+  <Card title="Reportes" icon="file-chart-column" href="/manual/admin/reportes">
+    Consulta ventas, pagos y análisis.
+  </Card>
+</CardGroup>

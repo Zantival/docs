@@ -1,0 +1,312 @@
+---
+title: "Mensajería en tiempo real con long-polling en FusaShop"
+sidebarTitle: "Chat"
+description: "Mensajería directa entre usuarios de FusaShop: long-polling, filtro de groserías, tarjetas de producto embebidas y notificaciones en tiempo real."
+---
+
+FusaShop incluye un sistema de mensajería directa que permite la comunicación entre cualquier par de usuarios registrados: consumidores, comerciantes y analistas. La comunicación en tiempo real se logra mediante **long-polling** (consultas periódicas desde el cliente) combinadas con eventos de Laravel Broadcasting para mayor inmediatez cuando el servidor de WebSockets esté disponible. Todas las rutas de chat están disponibles para cualquier usuario autenticado bajo el grupo de middleware `auth`.
+
+## Rutas del módulo de chat
+
+| Método | Ruta | Nombre | Descripción |
+|--------|------|---------|-------------|
+| `GET` | `/chat` | `chat.index` | Listado de conversaciones del usuario |
+| `GET` | `/chat/{user}` | `chat.show` | Ver conversación con un usuario específico |
+| `GET` | `/chat/{user}/poll` | `chat.poll` | Long-polling: mensajes nuevos desde timestamp |
+| `POST` | `/chat` | `chat.store` | Enviar un nuevo mensaje |
+| `DELETE` | `/chat/message/{id}` | `chat.destroy` | Eliminar un mensaje propio |
+
+---
+
+## Listado de conversaciones
+
+`GET /chat` agrupa todos los mensajes enviados o recibidos por el usuario autenticado y los organiza por interlocutor, mostrando la conversación más reciente primero.
+
+```php title="ChatController.php — index()"
+$userId = Auth::id();
+$conversations = Message::where('sender_id', $userId)
+    ->orWhere('receiver_id', $userId)
+    ->with(['sender', 'receiver'])
+    ->latest()
+    ->get()
+    ->groupBy(function($msg) use ($userId) {
+        return $msg->sender_id == $userId
+            ? $msg->receiver_id
+            : $msg->sender_id;
+    });
+```
+
+---
+
+## Ver una conversación
+
+`GET /chat/{user}` carga todos los mensajes entre el usuario autenticado y el interlocutor indicado por `{user}` (ID del otro usuario), ordenados cronológicamente de forma ascendente. Al cargar la vista, los mensajes del interlocutor se marcan automáticamente como leídos:
+
+```php title="ChatController.php — show()"
+// Marcar como leídos los mensajes recibidos
+Message::where('sender_id', $otherUserId)
+       ->where('receiver_id', $userId)
+       ->update(['is_read' => true]);
+```
+
+---
+
+## Mecanismo de long-polling
+
+El endpoint `GET /chat/{user}/poll` es el corazón del sistema en tiempo real. El cliente JavaScript lo llama periódicamente enviando un **timestamp Unix** como referencia; el servidor responde únicamente con los mensajes **posteriores** a ese timestamp.
+
+<Steps>
+  <Step title="El cliente envía la solicitud de polling">
+    El frontend llama a `GET /chat/{user}/poll?since={unix_timestamp}`, donde `since` es el timestamp del último mensaje recibido (o `0` en la primera consulta).
+  </Step>
+  <Step title="El servidor filtra mensajes nuevos">
+    El controlador convierte el timestamp con `Carbon::createFromTimestamp($since)` y consulta únicamente los mensajes con `created_at` mayor a esa fecha.
+  </Step>
+  <Step title="Los mensajes del interlocutor se marcan como leídos">
+    Al igual que en `show()`, el poll marca como leídos los mensajes recibidos en cada respuesta.
+  </Step>
+  <Step title="El servidor retorna JSON con el `server_time`">
+    La respuesta incluye el array `messages` y `server_time` (timestamp actual del servidor), que el cliente usará como valor `since` en la siguiente llamada.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php title="ChatController.php — poll()"
+public function poll($otherUserId, Request $request)
+{
+    $userId = Auth::id();
+    $since  = $request->input('since', 0); // Unix timestamp
+
+    $messages = Message::where(function($q) use ($userId, $otherUserId) {
+            $q->where('sender_id', $userId)->where('receiver_id', $otherUserId);
+        })->orWhere(function($q) use ($userId, $otherUserId) {
+            $q->where('sender_id', $otherUserId)->where('receiver_id', $userId);
+        })
+        ->where('created_at', '>', \Carbon\Carbon::createFromTimestamp($since))
+        ->orderBy('created_at', 'asc')
+        ->get()
+        ->map(function($m) use ($userId) {
+            return [
+                'id'      => $m->id,
+                'content' => e($m->content),
+                'mine'    => $m->sender_id === $userId,
+                'time'    => $m->created_at->format('H:i'),
+                'product' => $m->product
+                    ? ['name' => e($m->product->name), 'price' => number_format($m->product->price, 0, ',', '.')]
+                    : null,
+            ];
+        });
+
+    // Marcar como leídos los mensajes del interlocutor
+    Message::where('sender_id', $otherUserId)
+           ->where('receiver_id', $userId)
+           ->update(['is_read' => true]);
+
+    return response()->json(['messages' => $messages, 'server_time' => now()->timestamp]);
+}
+```
+</CodeGroup>
+
+### Estructura de respuesta del poll
+
+```json title="Respuesta JSON — GET /chat/{user}/poll"
+{
+  "messages": [
+    {
+      "id": 47,
+      "content": "¿Tienes disponible en talla L?",
+      "mine": false,
+      "time": "14:32",
+      "product": null
+    },
+    {
+      "id": 48,
+      "content": "Sí, tenemos en L y XL.",
+      "mine": true,
+      "time": "14:33",
+      "product": {
+        "name": "Camiseta Básica",
+        "price": "45.000"
+      }
+    }
+  ],
+  "server_time": 1717000213
+}
+```
+
+<Tip>
+  Usa el valor `server_time` de la respuesta como el `since` de la siguiente solicitud. Esto evita desfases de reloj entre el cliente y el servidor.
+</Tip>
+
+---
+
+## Enviar un mensaje
+
+`POST /chat` crea un nuevo mensaje. Antes de almacenarlo, el controlador aplica el filtro de groserías y luego dispara el evento `MessageSent` y la notificación `NewMessageNotification`.
+
+<CodeGroup>
+```php title="ChatController.php — store()"
+$request->validate([
+    'receiver_id' => 'required|exists:users,id',
+    'content'     => 'required|string|max:1000',
+    'product_id'  => 'nullable|exists:products,id',
+]);
+
+$content = strip_tags($request->content);
+
+// Filtro de groserías
+$badWords = Message::getBadWords();
+foreach ($badWords as $word) {
+    $pattern = '/\b' . preg_quote($word, '/') . '\b/iu';
+    $content = preg_replace($pattern, str_repeat('*', mb_strlen($word)), $content);
+}
+
+$message = Message::create([
+    'sender_id'   => Auth::id(),
+    'receiver_id' => $request->receiver_id,
+    'content'     => $content,
+    'product_id'  => $request->product_id,
+]);
+
+// Notificar al receptor
+$receiver = User::find($request->receiver_id);
+if ($receiver) {
+    $receiver->notify(new NewMessageNotification($message));
+}
+
+broadcast(new MessageSent($message))->toOthers();
+```
+</CodeGroup>
+
+### Parámetros de la solicitud
+
+<ParamField body="receiver_id" type="integer" required>
+  ID del usuario destinatario. Debe existir en la tabla `users`.
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  Texto del mensaje. Máximo 1 000 caracteres. Las etiquetas HTML se eliminan con `strip_tags`.
+</ParamField>
+
+<ParamField body="product_id" type="integer">
+  ID opcional de un producto para embeber su tarjeta en el mensaje. Debe existir en la tabla `products`.
+</ParamField>
+
+---
+
+## Filtro de groserías
+
+El modelo `Message` define una lista estática de palabras ofensivas principalmente en español colombiano. El método `Message::getBadWords()` retorna el array:
+
+```php title="Message.php — getBadWords()"
+public static function getBadWords()
+{
+    return [
+        'puta', 'mierda', 'marica', 'pendejo', 'pendeja', 'cabron', 'cabrón', 'idiota',
+        'estupido', 'estúpido', 'imbecil', 'imbécil', 'malparido', 'malparida', 'gonorrea',
+        'hijo de puta', 'hijueputa', 'jueputa', 'perra', 'pirobo', 'piroba', 'zorra', 'verga', 'culo',
+        // ... más términos
+    ];
+}
+```
+
+Cada palabra encontrada en el mensaje se reemplaza con asteriscos (`***`) con la misma longitud que la palabra original, usando una expresión regular con límites de palabra (`\b`) e insensible a mayúsculas y acentos (`/iu`):
+
+```php
+$pattern = '/\b' . preg_quote($word, '/') . '\b/iu';
+$content = preg_replace($pattern, str_repeat('*', mb_strlen($word)), $content);
+```
+
+<Note>
+  El filtro se aplica en el servidor antes de almacenar el mensaje, por lo que los mensajes guardados en la base de datos ya contienen la versión censurada.
+</Note>
+
+---
+
+## Tarjetas de producto embebidas
+
+Cualquier mensaje puede incluir una referencia a un producto mediante el campo `product_id`. El modelo `Message` define la relación:
+
+```php title="Message.php — relaciones"
+public function product() { return $this->belongsTo(Product::class); }
+```
+
+En el poll, si el mensaje tiene un producto asociado, la respuesta JSON incluye el `name` y el `price` formateado en COP. La vista `chat.show` renderiza este dato como una tarjeta visual dentro de la burbuja del mensaje.
+
+---
+
+## Eventos y notificaciones
+
+### `MessageSent` — Laravel Broadcasting
+
+Cuando se envía un mensaje, el controlador ejecuta:
+
+```php
+broadcast(new MessageSent($message))->toOthers();
+```
+
+El evento `MessageSent` se emite en el canal de broadcasting de Laravel (configurado con Laravel Echo y Pusher/Soketi). El método `toOthers()` excluye al emisor del canal para evitar duplicados, ya que el mensaje ya se muestra localmente.
+
+### `NewMessageNotification` — Notificación de base de datos
+
+En paralelo con el broadcasting, el receptor recibe una notificación persistente mediante `$receiver->notify(new NewMessageNotification($message))`. Esta notificación aparece en el centro de notificaciones del usuario y puede consultarse en `GET /notifications`.
+
+---
+
+## Eliminar un mensaje
+
+`DELETE /chat/message/{id}` permite al emisor eliminar su propio mensaje. El controlador verifica que `sender_id` coincida con el usuario autenticado antes de ejecutar el borrado:
+
+```php title="ChatController.php — destroy()"
+public function destroy($id)
+{
+    $message = Message::findOrFail($id);
+
+    if ($message->sender_id === Auth::id()) {
+        $message->delete();
+        return response()->json(['success' => true]);
+    }
+
+    return response()->json(['success' => false], 403);
+}
+```
+
+<Warning>
+  Solo el emisor puede eliminar un mensaje. Si intentas eliminar un mensaje de otro usuario, recibirás HTTP `403 Forbidden`.
+</Warning>
+
+---
+
+## Modelo `Message`
+
+```php title="Message.php — fillable y relaciones"
+protected $fillable = ['sender_id', 'receiver_id', 'product_id', 'content', 'is_read'];
+
+public function sender()   { return $this->belongsTo(User::class, 'sender_id'); }
+public function receiver() { return $this->belongsTo(User::class, 'receiver_id'); }
+public function product()  { return $this->belongsTo(Product::class); }
+```
+
+<ResponseField name="id" type="integer">
+  Identificador único del mensaje.
+</ResponseField>
+
+<ResponseField name="sender_id" type="integer">
+  ID del usuario que envió el mensaje.
+</ResponseField>
+
+<ResponseField name="receiver_id" type="integer">
+  ID del usuario destinatario.
+</ResponseField>
+
+<ResponseField name="product_id" type="integer | null">
+  ID del producto embebido, o `null` si no hay producto asociado.
+</ResponseField>
+
+<ResponseField name="content" type="string">
+  Texto del mensaje, ya procesado por el filtro de groserías.
+</ResponseField>
+
+<ResponseField name="is_read" type="boolean">
+  `true` si el destinatario ya vio el mensaje. Se actualiza en `show()` y en `poll()`.
+</ResponseField>

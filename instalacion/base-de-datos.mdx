@@ -1,0 +1,389 @@
+---
+title: "Configuración de base de datos y migraciones en FusaShop"
+sidebarTitle: "Base de Datos"
+description: "Aprende a configurar MySQL, PostgreSQL o SQLite en FusaShop, ejecutar migraciones y seeders, y entender el esquema de tablas del sistema."
+---
+
+FusaShop usa el ORM Eloquent de Laravel y el sistema de migraciones integrado para gestionar el esquema de la base de datos de forma reproducible. Todas las tablas se crean y actualizan mediante archivos de migración versionados que puedes aplicar, revertir o reiniciar en cualquier momento sin tocar SQL directamente.
+
+## Motores de base de datos soportados
+
+<CardGroup cols={3}>
+  <Card title="MySQL 8.0+" icon="database" href="/instalacion/variables-de-entorno">
+    **Recomendado para producción.** Configuración predeterminada en `.env.example`. Usa `utf8mb4` con collation `utf8mb4_unicode_ci` para soporte completo de Unicode y emojis.
+  </Card>
+  <Card title="PostgreSQL 14+" icon="database" href="/instalacion/variables-de-entorno">
+    Alternativa robusta para producción. Cambia `DB_CONNECTION=pgsql` y usa el puerto `5432`. La configuración completa está en `config/database.php`.
+  </Card>
+  <Card title="SQLite" icon="database" href="/instalacion/variables-de-entorno">
+    Ideal para desarrollo rápido y pruebas. No requiere servidor; la base de datos es un archivo local. Cambia `DB_CONNECTION=sqlite` y especifica la ruta del archivo.
+  </Card>
+</CardGroup>
+
+### Configurar MySQL (predeterminado)
+
+```bash title=".env — Configuración MySQL"
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=fusashop
+DB_USERNAME=root
+DB_PASSWORD=tu_password
+```
+
+Crea la base de datos antes de ejecutar las migraciones:
+
+```sql title="Crear base de datos MySQL"
+CREATE DATABASE fusashop
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+```
+
+### Configurar PostgreSQL
+
+```bash title=".env — Configuración PostgreSQL"
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=fusashop
+DB_USERNAME=postgres
+DB_PASSWORD=tu_password
+```
+
+```sql title="Crear base de datos PostgreSQL"
+CREATE DATABASE fusashop
+  ENCODING 'UTF8'
+  LC_COLLATE 'es_CO.UTF-8'
+  LC_CTYPE 'es_CO.UTF-8';
+```
+
+### Configurar SQLite (desarrollo)
+
+```bash title=".env — Configuración SQLite"
+DB_CONNECTION=sqlite
+DB_DATABASE=/ruta/absoluta/al/proyecto/database/database.sqlite
+```
+
+```bash title="Crear archivo SQLite"
+touch database/database.sqlite
+```
+
+---
+
+## Ejecutar migraciones
+
+Las migraciones crean todas las tablas del sistema de forma ordenada. Ejecuta este comando desde la raíz del proyecto después de configurar las variables de entorno:
+
+```bash title="Ejecutar todas las migraciones"
+php artisan migrate
+```
+
+Laravel registra cada migración ejecutada en la tabla `migrations` interna, de modo que solo aplica las migraciones pendientes en ejecuciones posteriores.
+
+### Verificar el estado de las migraciones
+
+```bash title="Ver estado de migraciones"
+php artisan migrate:status
+```
+
+### Revertir la última lote de migraciones
+
+```bash title="Revertir último lote"
+php artisan migrate:rollback
+```
+
+### Reiniciar toda la base de datos
+
+<Warning>
+  El comando `migrate:fresh` elimina **todas las tablas** y vuelve a crear el esquema desde cero. Úsalo únicamente en entornos de desarrollo. En producción perderás todos los datos.
+</Warning>
+
+```bash title="Reiniciar base de datos con datos de prueba"
+php artisan migrate:fresh --seed
+```
+
+---
+
+## Ejecutar seeders
+
+El seeder de FusaShop crea usuarios de prueba para los tres roles (analyst, merchant, consumer), diez productos de ejemplo y una orden de muestra. Ejecuta los seeders después de las migraciones:
+
+```bash title="Ejecutar DatabaseSeeder"
+php artisan db:seed
+```
+
+Tras ejecutar el seeder tendrás los siguientes usuarios, todos con contraseña `password123`:
+
+| Rol | Nombre | Email |
+|---|---|---|
+| `analyst` | Admin FusaShop | `admin@fusashop.com` |
+| `merchant` | Tienda Andina | `tienda@fusashop.com` |
+| `merchant` | Tech Store | `tech@fusashop.com` |
+| `consumer` | Juan Pérez | `juan@fusashop.com` |
+| `consumer` | María García | `maria@fusashop.com` |
+
+<Note>
+  El seeder también crea carritos vinculados a los consumidores de prueba y una orden entregada (`delivered`) a nombre de Juan Pérez con dos productos.
+</Note>
+
+---
+
+## Tablas del sistema
+
+FusaShop tiene 28 archivos de migración que definen las siguientes tablas principales:
+
+<Accordion title="users — Usuarios del sistema">
+  Tabla central de autenticación y roles. Almacena consumidores, merchants y analistas.
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `id` | bigint | Clave primaria |
+  | `name` | string | Nombre completo |
+  | `email` | string (unique) | Correo electrónico |
+  | `password` | string (nullable) | Hash bcrypt (nullable para auth social) |
+  | `role` | enum | `consumer`, `merchant`, `analyst` |
+  | `phone` | string (nullable) | Teléfono de contacto |
+  | `address` | text (nullable) | Dirección de envío predeterminada |
+  | `avatar` | string (nullable) | Ruta a la foto de perfil |
+  | `loyalty_points` | unsigned int | Puntos de fidelidad acumulados |
+  | `provider` | string (nullable) | Proveedor OAuth (`google`, `facebook`) |
+  | `provider_id` | string (nullable) | ID del usuario en el proveedor OAuth |
+  | `is_blocked` | boolean | Indica si el usuario está bloqueado |
+  | `email_verified_at` | timestamp (nullable) | Fecha de verificación de correo |
+</Accordion>
+
+<Accordion title="products — Catálogo de productos">
+  Productos publicados por los merchants (MiPymes).
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `id` | bigint | Clave primaria |
+  | `merchant_id` | FK → users | Merchant propietario |
+  | `name` | string | Nombre del producto |
+  | `slug` | string (unique) | URL amigable generada automáticamente |
+  | `description` | text (nullable) | Descripción detallada |
+  | `price` | decimal(10,2) | Precio en pesos colombianos |
+  | `stock` | integer | Unidades disponibles |
+  | `category` | string (nullable) | Categoría (Ropa, Electrónica, Hogar…) |
+  | `image` | string (nullable) | Imagen principal |
+  | `options` | json (nullable) | Variantes (talla, color, etc.) |
+  | `images` | json (nullable) | Galería de imágenes adicionales |
+  | `specifications` | json (nullable) | Especificaciones técnicas |
+  | `is_active` | boolean | Visibilidad en el catálogo |
+</Accordion>
+
+<Accordion title="orders y order_items — Pedidos">
+  Órdenes de compra y sus líneas de detalle.
+
+  **orders:**
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `id` | bigint | Clave primaria |
+  | `user_id` | FK → users | Consumidor que realizó el pedido |
+  | `total` | decimal(10,2) | Total del pedido |
+  | `status` | enum | `pending`, `processing`, `shipped`, `delivered`, `cancelled` |
+  | `payment_status` | enum | `pending`, `paid`, `failed` |
+  | `payment_method` | string | Método de pago (card, etc.) |
+  | `shipping_address` | text | Dirección de entrega |
+  | `notes` | text (nullable) | Notas adicionales del pedido |
+  | `discount` | decimal(12,2) | Descuento aplicado (cupón) |
+  | `points_used` | integer | Puntos de fidelidad canjeados en el pedido |
+  | `points_earned` | integer | Puntos de fidelidad generados por el pedido |
+
+  **order_items:**
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `order_id` | FK → orders | Pedido asociado |
+  | `product_id` | FK → products | Producto comprado |
+  | `quantity` | integer | Cantidad |
+  | `price` | decimal(10,2) | Precio unitario al momento de la compra |
+</Accordion>
+
+<Accordion title="carts y cart_items — Carrito de compras">
+  Carrito persistente asociado a cada consumidor.
+
+  **carts:** `id`, `user_id` (FK → users), `created_at`, `updated_at`.
+
+  **cart_items:** `id`, `cart_id` (FK → carts), `product_id` (FK → products), `quantity`, `created_at`, `updated_at`. La combinación `(cart_id, product_id)` es única.
+</Accordion>
+
+<Accordion title="reviews — Reseñas de productos">
+  Valoraciones escritas por consumidores sobre productos que han comprado.
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `product_id` | FK → products | Producto valorado |
+  | `user_id` | FK → users | Autor de la reseña |
+  | `rating` | tinyint unsigned | Puntuación de 1 a 5 |
+  | `comment` | text (nullable) | Comentario escrito |
+  | `merchant_reply` | text (nullable) | Respuesta del merchant |
+</Accordion>
+
+<Accordion title="messages — Chat entre usuarios">
+  Mensajes directos entre consumidores y merchants, opcionalmente asociados a un producto.
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `sender_id` | FK → users | Usuario que envía |
+  | `receiver_id` | FK → users | Usuario que recibe |
+  | `product_id` | FK → products (nullable) | Producto de referencia |
+  | `content` | text | Contenido del mensaje |
+  | `is_read` | boolean | Indica si fue leído |
+</Accordion>
+
+<Accordion title="p_q_r_s — Peticiones, Quejas, Reclamos y Sugerencias">
+  Sistema de soporte y gestión de PQRS enviadas por los usuarios.
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `user_id` | FK → users | Usuario que presenta la solicitud |
+  | `type` | enum | `peticion`, `queja`, `reclamo`, `sugerencia` |
+  | `subject` | string | Asunto |
+  | `content` | text | Descripción detallada |
+  | `status` | enum | `pending`, `in_review`, `resolved`, `closed` |
+  | `admin_response` | text (nullable) | Respuesta del analista |
+  | `resolved_at` | timestamp (nullable) | Fecha de resolución |
+</Accordion>
+
+<Accordion title="company_profiles — Perfiles de MiPymes">
+  Información empresarial de los merchants, incluyendo KYC (Know Your Customer).
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `merchant_id` | FK → users | Merchant propietario |
+  | `company_name` | string | Razón social |
+  | `phone` | string | Teléfono empresarial |
+  | `rut_path` | string | Ruta del RUT cargado |
+  | `logo_path` | string (nullable) | Logo de la empresa |
+  | `banners_path` | json (nullable) | Imágenes de banners |
+  | `description` | text (nullable) | Descripción de la empresa |
+  | `kyc_status` | enum | `pending`, `approved`, `rejected` |
+  | `kyc_notes` | text (nullable) | Observaciones del analista |
+  | `address` | text (nullable) | Dirección física |
+  | `latitude` / `longitude` | decimal (nullable) | Coordenadas geográficas |
+  | `google_maps_url` | text (nullable) | URL de Google Maps |
+</Accordion>
+
+<Accordion title="coupons — Cupones de descuento">
+  Cupones creados por merchants para aplicar descuentos en pedidos.
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `merchant_id` | FK → users | Merchant propietario |
+  | `code` | string (unique) | Código del cupón |
+  | `type` | enum | `fixed` (valor fijo) o `percentage` (porcentaje) |
+  | `value` | decimal(10,2) | Valor del descuento |
+  | `min_order_amount` | decimal(10,2) | Monto mínimo para aplicar |
+  | `expires_at` | timestamp (nullable) | Fecha de expiración |
+  | `usage_limit` | integer (nullable) | Límite de usos totales |
+  | `used_count` | integer | Número de veces usado |
+  | `is_active` | boolean | Estado del cupón |
+</Accordion>
+
+<Accordion title="global_banners y banner_requests — Banners publicitarios">
+  **global_banners:** Banners del carrusel principal, gestionados por el analista. Campos: `title`, `image_path`, `link_url`, `is_active`, `sort_order`.
+
+  **banner_requests:** Solicitudes de merchants para publicar banners. Campos: `user_id`, `image_path`, `payment_proof_path`, `status` (`pending`, `approved`, `rejected`), `notes`, `cost`.
+</Accordion>
+
+<Accordion title="loyalty_points — Puntos de fidelidad">
+  Tabla de relación entre consumidores y merchants para el sistema de puntos.
+
+  | Columna | Tipo | Descripción |
+  |---|---|---|
+  | `user_id` | FK → users | Consumidor |
+  | `merchant_id` | FK → users | Merchant asociado |
+  | `points` | integer | Puntos acumulados en este merchant |
+</Accordion>
+
+<Accordion title="Otras tablas del sistema">
+  - **`personal_access_tokens`** — Tokens de API para Laravel Sanctum.
+  - **`cache`** — Almacenamiento de caché en base de datos (cuando `CACHE_STORE=database`).
+  - **`sessions`** — Sesiones de usuario almacenadas en BD (cuando `SESSION_DRIVER=database`).
+  - **`notifications`** — Notificaciones del sistema.
+  - **`password_reset_tokens`** — Tokens para restablecimiento de contraseña.
+  - **`password_reset_offline_requests`** — Solicitudes de reseteo fuera de línea gestionadas por el analista.
+</Accordion>
+
+---
+
+## Listado completo de migraciones
+
+Las siguientes migraciones se ejecutan en orden cronológico al correr `php artisan migrate`:
+
+```text title="Archivos de migración (en orden de ejecución)"
+2024_01_01_000001_create_users_table.php
+2024_01_01_000002_create_shop_tables.php
+2024_01_01_000003_create_personal_access_tokens_table.php
+2024_01_01_000004_create_cache_table.php
+2024_01_01_000005_add_is_blocked_to_users_table.php
+2026_04_18_201819_create_company_profiles_table.php
+2026_04_18_201821_create_reviews_table.php
+2026_04_18_211948_create_notifications_table.php
+2026_04_19_000001_create_global_banners_table.php
+2026_04_19_170331_create_banner_requests_table.php
+2026_04_19_170332_create_password_reset_offline_requests_table.php
+2026_04_22_204337_add_fidelity_and_legal_to_users_table.php
+2026_04_22_204648_create_coupons_table.php
+2026_04_22_205125_create_messages_table.php
+2026_04_23_123251_add_address_to_company_profiles.php
+2026_04_26_210745_add_new_features_fusashop.php
+2026_04_26_213924_add_coordinates_to_company_profiles.php
+2026_04_26_222924_add_loyalty_points_to_users_table.php
+2026_04_26_223900_add_discount_to_orders_table.php
+2026_04_28_215306_add_kyc_fields_to_company_profiles_table.php
+2026_05_01_134401_add_points_to_orders_table.php
+2026_05_01_155505_add_cost_to_banner_requests_table.php
+2026_05_04_120021_add_merchant_reply_to_reviews_table.php
+2026_05_04_121528_create_p_q_r_s_table.php
+2026_05_04_161008_add_options_and_images_to_shop_tables.php
+2026_05_04_162812_add_specifications_to_products_table.php
+2026_05_04_180615_add_kyc_notes_to_company_profiles_table.php
+2026_09_01_000000_mark_existing_users_verified.php
+```
+
+---
+
+## Flujo de trabajo recomendado
+
+<Tabs>
+  <Tab title="Desarrollo nuevo">
+    Cuando configuras el proyecto por primera vez en un entorno limpio:
+
+    ```bash title="Setup completo desde cero"
+    php artisan migrate
+    php artisan db:seed
+    ```
+  </Tab>
+  <Tab title="Reinicio de datos">
+    Cuando necesitas limpiar todos los datos y empezar con los seeders:
+
+    ```bash title="Reinicio total (solo desarrollo)"
+    php artisan migrate:fresh --seed
+    ```
+  </Tab>
+  <Tab title="Nueva migración">
+    Cuando añades una nueva característica que requiere cambios en la BD:
+
+    ```bash title="Crear y aplicar nueva migración"
+    # Crear el archivo de migración
+    php artisan make:migration add_campo_to_tabla
+
+    # Editar el archivo generado en database/migrations/
+    # Luego aplicar solo las migraciones pendientes
+    php artisan migrate
+    ```
+  </Tab>
+  <Tab title="Revertir cambios">
+    Cuando necesitas deshacer la última migración aplicada:
+
+    ```bash title="Revertir último lote"
+    php artisan migrate:rollback
+
+    # O revertir un número específico de lotes
+    php artisan migrate:rollback --step=3
+    ```
+  </Tab>
+</Tabs>

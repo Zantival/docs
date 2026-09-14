@@ -1,0 +1,266 @@
+---
+title: "Endpoints de productos activos en la API REST de FusaShop"
+sidebarTitle: "Productos"
+description: "Consulta el catálogo de productos activos de FusaShop con soporte de búsqueda, filtro por categoría y paginación de 12 ítems por página."
+---
+
+Los endpoints de productos permiten a cualquier cliente —autenticado o no— explorar el catálogo activo de FusaShop. Puedes listar productos con filtros de búsqueda y categoría, o consultar el detalle completo de un producto por su identificador. Todos los resultados excluyen automáticamente los productos marcados como inactivos (`is_active = false`).
+
+---
+
+## Listar productos
+
+Devuelve una lista paginada de 12 productos activos por página. Soporta filtrado por texto libre y por categoría.
+
+```http
+GET /api/products
+```
+
+### Parámetros de consulta (query params)
+
+<ParamField query="search" type="string">
+  Término de búsqueda. Se aplica sobre los campos `name`, `description` y `category` usando coincidencia parcial (LIKE).
+</ParamField>
+
+<ParamField query="category" type="string">
+  Filtra los productos por categoría exacta. El valor debe coincidir con el campo `category` almacenado en la base de datos.
+</ParamField>
+
+<ParamField query="page" type="integer">
+  Número de página. Por defecto es `1`. Cada página contiene 12 productos.
+</ParamField>
+
+### Estructura de la respuesta
+
+La respuesta sigue la estructura estándar de paginación de Laravel:
+
+<ResponseField name="current_page" type="integer">
+  Número de la página actual.
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Arreglo con los productos de la página actual. Cada elemento sigue la estructura del modelo `Product`.
+</ResponseField>
+
+<ResponseField name="first_page_url" type="string">
+  URL completa de la primera página de resultados.
+</ResponseField>
+
+<ResponseField name="from" type="integer">
+  Índice del primer elemento en la página actual (base 1).
+</ResponseField>
+
+<ResponseField name="last_page" type="integer">
+  Número total de páginas.
+</ResponseField>
+
+<ResponseField name="last_page_url" type="string">
+  URL completa de la última página de resultados.
+</ResponseField>
+
+<ResponseField name="next_page_url" type="string | null">
+  URL de la siguiente página, o `null` si esta es la última.
+</ResponseField>
+
+<ResponseField name="path" type="string">
+  URL base del endpoint sin parámetros de paginación.
+</ResponseField>
+
+<ResponseField name="per_page" type="integer">
+  Cantidad de elementos por página. Siempre es `12`.
+</ResponseField>
+
+<ResponseField name="prev_page_url" type="string | null">
+  URL de la página anterior, o `null` si esta es la primera.
+</ResponseField>
+
+<ResponseField name="to" type="integer">
+  Índice del último elemento en la página actual.
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total de productos activos que coinciden con los filtros aplicados.
+</ResponseField>
+
+<CodeGroup>
+
+```bash Listar todos los productos
+curl -X GET "https://tusitio.com/api/products" \
+  -H "Accept: application/json"
+```
+
+```bash Buscar por término
+curl -X GET "https://tusitio.com/api/products?search=camiseta" \
+  -H "Accept: application/json"
+```
+
+```bash Filtrar por categoría
+curl -X GET "https://tusitio.com/api/products?category=ropa&page=2" \
+  -H "Accept: application/json"
+```
+
+</CodeGroup>
+
+```json title="Respuesta 200 OK"
+{
+  "current_page": 1,
+  "data": [
+    {
+      "id": 7,
+      "merchant_id": 3,
+      "name": "Camiseta Artesanal Bordada",
+      "slug": "camiseta-artesanal-bordada",
+      "description": "Camiseta 100% algodón con bordado a mano de motivos andinos.",
+      "price": "35000.00",
+      "stock": 50,
+      "category": "ropa",
+      "image": "products/camiseta-andina.jpg",
+      "available_options": ["talla-s", "talla-m", "talla-l"],
+      "images": [
+        "products/camiseta-andina-front.jpg",
+        "products/camiseta-andina-back.jpg"
+      ],
+      "is_active": true,
+      "specifications": {
+        "material": "100% algodón",
+        "origen": "Colombia"
+      },
+      "created_at": "2025-01-10T08:00:00.000000Z",
+      "updated_at": "2025-01-12T14:20:00.000000Z"
+    }
+  ],
+  "first_page_url": "https://tusitio.com/api/products?page=1",
+  "from": 1,
+  "last_page": 5,
+  "last_page_url": "https://tusitio.com/api/products?page=5",
+  "next_page_url": "https://tusitio.com/api/products?page=2",
+  "path": "https://tusitio.com/api/products",
+  "per_page": 12,
+  "prev_page_url": null,
+  "to": 12,
+  "total": 57
+}
+```
+
+---
+
+## Obtener un producto
+
+Devuelve el detalle completo de un único producto activo identificado por su `id`. Si el producto no existe o está inactivo, la API responde con `404 Not Found`.
+
+```http
+GET /api/products/{id}
+```
+
+### Parámetro de ruta
+
+<ParamField path="id" type="integer" required>
+  Identificador numérico del producto.
+</ParamField>
+
+### Campos de la respuesta
+
+<ResponseField name="id" type="integer">
+  Identificador único del producto.
+</ResponseField>
+
+<ResponseField name="merchant_id" type="integer">
+  ID del usuario merchant (MiPyme) propietario del producto.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Nombre del producto.
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  Versión URL-amigable del nombre, usada en las rutas de la tienda web.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Descripción detallada del producto.
+</ResponseField>
+
+<ResponseField name="price" type="string">
+  Precio en la moneda local, formateado con dos decimales (p. ej. `"35000.00"`).
+</ResponseField>
+
+<ResponseField name="stock" type="integer">
+  Unidades disponibles en inventario.
+</ResponseField>
+
+<ResponseField name="category" type="string">
+  Categoría del producto (texto libre tal como lo ingresó el merchant).
+</ResponseField>
+
+<ResponseField name="image" type="string">
+  Ruta relativa a la imagen principal del producto.
+</ResponseField>
+
+<ResponseField name="available_options" type="array">
+  Arreglo de opciones disponibles para el producto (p. ej. tallas, colores). Puede ser `null` si no aplica.
+</ResponseField>
+
+<ResponseField name="images" type="array">
+  Arreglo de rutas a imágenes adicionales del producto. Puede ser `null` o vacío.
+</ResponseField>
+
+<ResponseField name="is_active" type="boolean">
+  Siempre `true` en este endpoint, ya que el scope `active()` filtra los inactivos.
+</ResponseField>
+
+<ResponseField name="specifications" type="object">
+  Objeto de clave-valor con especificaciones técnicas del producto (p. ej. material, dimensiones). Puede ser `null`.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Fecha y hora de creación en formato ISO 8601.
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Fecha y hora de la última actualización en formato ISO 8601.
+</ResponseField>
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X GET "https://tusitio.com/api/products/7" \
+  -H "Accept: application/json"
+```
+
+```json Respuesta 200 OK
+{
+  "id": 7,
+  "merchant_id": 3,
+  "name": "Camiseta Artesanal Bordada",
+  "slug": "camiseta-artesanal-bordada",
+  "description": "Camiseta 100% algodón con bordado a mano de motivos andinos.",
+  "price": "35000.00",
+  "stock": 50,
+  "category": "ropa",
+  "image": "products/camiseta-andina.jpg",
+  "available_options": ["talla-s", "talla-m", "talla-l"],
+  "images": [
+    "products/camiseta-andina-front.jpg",
+    "products/camiseta-andina-back.jpg"
+  ],
+  "is_active": true,
+  "specifications": {
+    "material": "100% algodón",
+    "origen": "Colombia"
+  },
+  "created_at": "2025-01-10T08:00:00.000000Z",
+  "updated_at": "2025-01-12T14:20:00.000000Z"
+}
+```
+
+```json Respuesta 404 Not Found
+{
+  "message": "No query results for model [App\\Models\\Product] 999"
+}
+```
+
+</CodeGroup>
+
+<Info>
+  Los endpoints de productos son **públicos**: no requieren autenticación. Puedes consultarlos sin enviar el encabezado `Authorization`.
+</Info>

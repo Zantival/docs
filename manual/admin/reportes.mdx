@@ -1,0 +1,85 @@
+---
+title: "Reportes de ventas, pagos, reseñas y análisis con IA"
+sidebarTitle: "Reportes"
+description: "Consulta reportes imprimibles de ventas, pagos y reseñas en FusaShop, y ejecuta el módulo de análisis con Python para obtener insights automatizados."
+---
+
+Los reportes te dan la información que necesitas para tomar decisiones sobre el rumbo de FusaShop. Desde el panel del analista puedes acceder a reportes de ventas imprimibles, listados detallados de pagos, análisis de reseñas y ejecutar el módulo de aprendizaje automático que procesa datos de la plataforma. Esta página resume cada reporte disponible.
+
+## Reportes disponibles
+
+<CardGroup cols={2}>
+  <Card title="Pedidos" icon="clipboard-list" href="/manual/admin/reportes">
+    Historial completo en `/admin/orders` con filtros por fecha y estado.
+  </Card>
+
+  <Card title="Pagos" icon="credit-card" href="/manual/admin/reportes">
+    Detalle de transacciones PayU en `/admin/payments`.
+  </Card>
+
+  <Card title="Ventas imprimibles" icon="print" href="/manual/admin/reportes">
+    Reporte formateado para impresión en `/admin/sales-report-print`.
+  </Card>
+
+  <Card title="Reseñas reportadas" icon="flag" href="/manual/admin/reportes">
+    Calificaciones señaladas por usuarios en `/admin/reviews-report`.
+  </Card>
+</CardGroup>
+
+## Reporte de ventas imprimible
+
+<Steps>
+  <Step title="Abre el reporte">
+    Ve a `/admin/sales-report-print` desde el panel.
+  </Step>
+  <Step title="Define el rango">
+    Selecciona las fechas de inicio y fin del reporte.
+  </Step>
+  <Step title="Genera la vista">
+    El sistema mostrará el reporte con totales por comerciante, categoría y método de pago.
+  </Step>
+  <Step title="Imprime o exporta">
+    Usa la opción de imprimir del navegador para guardarlo como PDF o enviarlo a la impresora.
+  </Step>
+</Steps>
+
+## Reporte de pagos
+
+En `/admin/payments` encontrarás cada transacción procesada por PayU con su estado, monto, fecha, comerciante involucrado y cliente pagador. Usa este reporte para conciliar movimientos con los reportes de la pasarela.
+
+## Reporte de reseñas
+
+En `/admin/reviews-report` puedes revisar reseñas negativas, calificaciones marcadas como inapropiadas y comentarios que requieren moderación. Desde aquí puedes intervenir en casos específicos para mantener la calidad de la plataforma.
+
+## Análisis con Python (ML)
+
+<Info>
+  FusaShop cuenta con un módulo de análisis basado en Python que procesa datos históricos para detectar patrones y generar predicciones útiles para la administración.
+</Info>
+
+<Steps>
+  <Step title="Abre la ejecución de ML">
+    Ve a `/admin/run-ml` desde el panel del analista.
+  </Step>
+  <Step title="Selecciona el análisis">
+    Elige el tipo de análisis que deseas ejecutar (por ejemplo, predicción de ventas o detección de anomalías).
+  </Step>
+  <Step title="Lanza la ejecución">
+    Haz clic en **Ejecutar**. El proceso puede tardar unos minutos según el volumen de datos.
+  </Step>
+  <Step title="Revisa los resultados">
+    Al terminar, verás los hallazgos en pantalla. Podrás descargarlos o compartirlos con el equipo.
+  </Step>
+</Steps>
+
+## Próximos pasos
+
+<CardGroup cols={2}>
+  <Card title="Panel del analista" icon="gauge" href="/manual/admin/panel-analista">
+    Vuelve al dashboard con métricas globales.
+  </Card>
+
+  <Card title="Banners globales" icon="rectangle-ad" href="/manual/admin/banners-globales">
+    Gestiona la publicidad de la plataforma.
+  </Card>
+</CardGroup>

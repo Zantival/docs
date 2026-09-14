@@ -1,0 +1,237 @@
+---
+title: "Endpoint de órdenes del usuario en la API REST de FusaShop"
+sidebarTitle: "Órdenes"
+description: "Consulta el historial completo de órdenes del usuario autenticado, con ítems, productos y estados de pago, desde la API REST de FusaShop."
+---
+
+El endpoint de órdenes permite al usuario autenticado consultar todo su historial de compras en FusaShop. Cada orden incluye sus ítems con el detalle completo del producto, los montos de descuento y puntos, la dirección de envío y el estado actual de la orden y del pago. Los resultados se devuelven ordenados de más reciente a más antiguo.
+
+<Warning>
+  Este endpoint requiere autenticación. Incluye el encabezado `Authorization: Bearer {token}` en la solicitud. Sin él, la API responde con `401 Unauthorized`.
+</Warning>
+
+---
+
+## Listar órdenes del usuario
+
+Devuelve todas las órdenes del usuario autenticado, incluyendo cada ítem de la orden y el producto asociado a él. El listado está ordenado por fecha de creación descendente (la más reciente primero).
+
+```http
+GET /api/orders
+```
+
+Este endpoint no acepta parámetros de consulta. Siempre devuelve la totalidad de las órdenes del usuario.
+
+---
+
+## Campos de la respuesta
+
+La respuesta es un arreglo JSON donde cada elemento representa una orden.
+
+### Campos de la orden
+
+<ResponseField name="id" type="integer">
+  Identificador único de la orden.
+</ResponseField>
+
+<ResponseField name="user_id" type="integer">
+  ID del usuario que realizó la orden.
+</ResponseField>
+
+<ResponseField name="total" type="string">
+  Monto total de la orden, formateado con dos decimales (p. ej. `"125000.00"`).
+</ResponseField>
+
+<ResponseField name="discount" type="string | number | null">
+  Monto de descuento aplicado. Puede ser `null` si no hubo descuento.
+</ResponseField>
+
+<ResponseField name="points_used" type="integer | null">
+  Puntos de fidelidad usados en esta orden. Puede ser `null`.
+</ResponseField>
+
+<ResponseField name="points_earned" type="integer | null">
+  Puntos de fidelidad ganados por esta compra. Puede ser `null`.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Estado actual de la orden. Valores posibles:
+
+  | Valor | Descripción |
+  |---|---|
+  | `pending` | Orden recibida, pendiente de procesamiento. |
+  | `processing` | Orden en preparación por el merchant. |
+  | `shipped` | Orden despachada al transportista. |
+  | `delivered` | Orden entregada al consumidor. |
+  | `cancelled` | Orden cancelada. |
+</ResponseField>
+
+<ResponseField name="shipping_address" type="string | null">
+  Dirección de envío registrada para la orden.
+</ResponseField>
+
+<ResponseField name="payment_method" type="string | null">
+  Método de pago utilizado (p. ej. `tarjeta`, `transferencia`).
+</ResponseField>
+
+<ResponseField name="payment_status" type="string">
+  Estado del pago. Valores posibles:
+
+  | Valor | Descripción |
+  |---|---|
+  | `pending` | Pago pendiente de confirmación. |
+  | `paid` | Pago confirmado. |
+  | `failed` | Pago fallido o rechazado. |
+</ResponseField>
+
+<ResponseField name="notes" type="string | null">
+  Notas adicionales ingresadas por el usuario al realizar la orden.
+</ResponseField>
+
+<ResponseField name="created_at" type="string">
+  Fecha y hora de creación de la orden en formato ISO 8601.
+</ResponseField>
+
+<ResponseField name="updated_at" type="string">
+  Fecha y hora de la última actualización en formato ISO 8601.
+</ResponseField>
+
+<ResponseField name="items" type="array">
+  Lista de ítems que componen la orden.
+
+  <ResponseField name="items[].id" type="integer">
+    Identificador único del ítem de la orden.
+  </ResponseField>
+
+  <ResponseField name="items[].order_id" type="integer">
+    ID de la orden a la que pertenece el ítem.
+  </ResponseField>
+
+  <ResponseField name="items[].product_id" type="integer">
+    ID del producto comprado.
+  </ResponseField>
+
+  <ResponseField name="items[].quantity" type="integer">
+    Cantidad de unidades compradas.
+  </ResponseField>
+
+  <ResponseField name="items[].price" type="string">
+    Precio unitario del producto **al momento de la compra**, formateado con dos decimales. Este valor es inmutable y no cambia si el merchant modifica el precio del producto después.
+  </ResponseField>
+
+  <ResponseField name="items[].selected_options" type="array | null">
+    Opciones seleccionadas por el usuario (p. ej. talla, color). Puede ser `null`.
+  </ResponseField>
+
+  <ResponseField name="items[].product" type="object">
+    Objeto con los campos actuales del producto asociado (ver [modelo Product](/api/productos)). Puede diferir del precio registrado en `items[].price` si el merchant lo actualizó posteriormente.
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Ciclo de vida de una orden
+
+El campo `status` refleja el progreso de la orden desde su creación hasta su entrega. A continuación se muestra el flujo típico:
+
+<Steps>
+  <Step title="pending">
+    La orden fue creada y está esperando que el merchant la procese.
+  </Step>
+  <Step title="processing">
+    El merchant confirmó la orden y la está preparando para despacho.
+  </Step>
+  <Step title="shipped">
+    La orden fue entregada al transportista y está en camino.
+  </Step>
+  <Step title="delivered">
+    El consumidor recibió la orden satisfactoriamente.
+  </Step>
+</Steps>
+
+<Note>
+  Una orden puede pasar a estado `cancelled` desde cualquier punto del flujo antes de ser marcada como `delivered`.
+</Note>
+
+---
+
+## Ejemplo completo
+
+<CodeGroup>
+
+```bash Solicitud
+curl -X GET "https://tusitio.com/api/orders" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer 2|xYzAbCdEfGhIjKlMnOpQrStUvWxYz9876543210"
+```
+
+```json Respuesta 200 OK
+[
+  {
+    "id": 101,
+    "user_id": 42,
+    "total": "70000.00",
+    "discount": "5000.00",
+    "points_used": 50,
+    "points_earned": 65,
+    "status": "delivered",
+    "shipping_address": "Calle 45 # 12-30, Bogotá, Colombia",
+    "payment_method": "tarjeta",
+    "payment_status": "paid",
+    "notes": "Por favor empacar en caja resistente.",
+    "created_at": "2025-01-10T09:00:00.000000Z",
+    "updated_at": "2025-01-14T17:30:00.000000Z",
+    "items": [
+      {
+        "id": 210,
+        "order_id": 101,
+        "product_id": 7,
+        "quantity": 2,
+        "price": "35000.00",
+        "selected_options": ["talla-m"],
+        "created_at": "2025-01-10T09:00:00.000000Z",
+        "updated_at": "2025-01-10T09:00:00.000000Z",
+        "product": {
+          "id": 7,
+          "merchant_id": 3,
+          "name": "Camiseta Artesanal Bordada",
+          "slug": "camiseta-artesanal-bordada",
+          "description": "Camiseta 100% algodón con bordado a mano de motivos andinos.",
+          "price": "35000.00",
+          "stock": 48,
+          "category": "ropa",
+          "image": "products/camiseta-andina.jpg",
+          "available_options": ["talla-s", "talla-m", "talla-l"],
+          "images": ["products/camiseta-andina-front.jpg"],
+          "is_active": true,
+          "specifications": { "material": "100% algodón" },
+          "created_at": "2025-01-08T08:00:00.000000Z",
+          "updated_at": "2025-01-10T09:00:00.000000Z"
+        }
+      }
+    ]
+  },
+  {
+    "id": 88,
+    "user_id": 42,
+    "total": "120000.00",
+    "discount": null,
+    "points_used": 0,
+    "points_earned": 120,
+    "status": "cancelled",
+    "shipping_address": "Carrera 7 # 22-15, Medellín, Colombia",
+    "payment_method": "transferencia",
+    "payment_status": "failed",
+    "notes": null,
+    "created_at": "2025-01-05T14:00:00.000000Z",
+    "updated_at": "2025-01-06T10:00:00.000000Z",
+    "items": []
+  }
+]
+```
+
+</CodeGroup>
+
+<Tip>
+  Si el usuario no tiene órdenes aún, la respuesta es un arreglo vacío `[]` con código `200 OK`. No se devuelve un error 404.
+</Tip>

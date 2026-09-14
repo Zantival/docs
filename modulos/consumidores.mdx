@@ -1,0 +1,509 @@
+---
+title: "Consumidores en FusaShop: tienda, carrito y pedidos"
+sidebarTitle: "Consumidores"
+description: "Tienda pública, carrito con opciones, checkout con puntos de fidelización y reseñas verificadas: guía del módulo de consumidores en FusaShop."
+---
+
+El módulo de consumidores es el corazón comercial de FusaShop. Abarca desde las páginas públicas (catálogo, detalle de producto y directorio de comerciantes) hasta las rutas protegidas donde el consumidor gestiona su carrito, realiza pedidos, consulta recibos, actualiza su perfil y deja reseñas. Todo se implementa en `ConsumerController`, ubicado en `app/Http/Controllers/Consumer/ConsumerController.php`.
+
+---
+
+## Rutas del módulo
+
+Todas las rutas comparten el prefijo `/shop` y el nombre `consumer.*`. Las rutas públicas no requieren autenticación; las protegidas exigen los middlewares `auth`, `verified` y `role:consumer`.
+
+### Rutas públicas
+
+| Método | URI | Nombre de ruta | Descripción |
+|--------|-----|----------------|-------------|
+| `GET` | `/shop/` | `consumer.home` | Página principal con destacados y banners |
+| `GET` | `/shop/catalog` | `consumer.catalog` | Catálogo con búsqueda y filtros |
+| `GET` | `/shop/product/{id}` | `consumer.product` | Detalle de producto |
+| `GET` | `/shop/directory` | `consumer.directory` | Directorio de comerciantes aprobados |
+| `GET` | `/shop/directory/brand/{id}` | `consumer.merchant.profile` | Perfil de marca de un comerciante |
+
+### Rutas protegidas (`auth` + `verified` + `role:consumer`)
+
+| Método | URI | Nombre de ruta | Descripción |
+|--------|-----|----------------|-------------|
+| `GET` | `/shop/cart` | `consumer.cart` | Ver carrito |
+| `POST` | `/shop/cart/add` | `consumer.cart.add` | Agregar producto |
+| `PATCH` | `/shop/cart/item/{item}` | `consumer.cart.update` | Actualizar cantidad |
+| `DELETE` | `/shop/cart/item/{item}` | `consumer.cart.remove` | Eliminar ítem |
+| `GET` | `/shop/checkout` | `consumer.checkout` | Pantalla de checkout |
+| `POST` | `/shop/checkout` | `consumer.checkout.process` | Procesar pedido |
+| `GET` | `/shop/orders` | `consumer.orders` | Historial de pedidos |
+| `GET` | `/shop/orders/{id}/receipt` | `consumer.orders.receipt` | Recibo de un pedido |
+| `POST` | `/shop/product/{id}/review` | `consumer.product.review` | Enviar reseña |
+
+---
+
+## Tienda pública
+
+Las rutas públicas no requieren autenticación y conforman la vitrina de FusaShop.
+
+<Accordion title="Página principal – home()">
+  Carga hasta 8 productos activos ordenados por fecha de creación, las categorías disponibles y los banners globales activos ordenados por `sort_order`.
+
+  ```php ConsumerController.php - home()
+  public function home()
+  {
+      $featured  = Product::active()->with('merchant.companyProfile')->latest()->take(8)->get();
+      $categories = Product::active()->select('category')->distinct()->pluck('category');
+      $globalBanners = GlobalBanner::where('is_active', true)->orderBy('sort_order')->get();
+      return view('consumer.home', compact('featured', 'categories', 'globalBanners'));
+  }
+  ```
+</Accordion>
+
+<Accordion title="Catálogo con búsqueda y filtros – catalog()">
+  Aplica los filtros `search`, `category`, `min_price` y `max_price` de forma encadenada, paginando 12 productos por página. La búsqueda usa el scope `search()` del modelo `Product`, que busca en `name`, `description` y `category`.
+
+  ```php ConsumerController.php - catalog()
+  public function catalog(Request $request)
+  {
+      $q = Product::active()->with('merchant.companyProfile');
+
+      if ($request->filled('search'))    $q->search($request->search);
+      if ($request->filled('category'))  $q->where('category', $request->category);
+      if ($request->filled('min_price')) $q->where('price', '>=', $request->min_price);
+      if ($request->filled('max_price')) $q->where('price', '<=', $request->max_price);
+
+      $products   = $q->paginate(12)->withQueryString();
+      $categories = Product::active()->select('category')->distinct()->pluck('category');
+      $directory  = CompanyProfile::where('kyc_status', 'approved')
+                        ->select('id','merchant_id','company_name','logo_path')
+                        ->take(10)->get();
+
+      return view('consumer.catalog', compact('products', 'categories', 'directory'));
+  }
+  ```
+</Accordion>
+
+<Accordion title="Detalle de producto – productDetail()">
+  Carga el producto con sus reseñas y usuarios. Si el consumidor está autenticado, verifica si tiene un pedido `delivered` que contenga ese producto para habilitar el botón de reseña.
+
+  ```php ConsumerController.php - productDetail()
+  public function productDetail($id)
+  {
+      $product = Product::active()->with('reviews.user')->findOrFail($id);
+      $related = Product::active()
+                    ->where('category', $product->category)
+                    ->where('id', '!=', $id)
+                    ->take(4)->get();
+
+      $hasPurchased = false;
+      if (Auth::check()) {
+          $hasPurchased = Order::where('user_id', Auth::id())
+              ->where('status', 'delivered')
+              ->whereHas('items', fn($q) => $q->where('product_id', $id))
+              ->exists();
+      }
+
+      return view('consumer.product-detail', compact('product', 'related', 'hasPurchased'));
+  }
+  ```
+</Accordion>
+
+---
+
+## Carrito de compras
+
+### Agregar al carrito (`cartAdd`)
+
+El comportamiento clave de `cartAdd` es la detección de **duplicados por opciones seleccionadas**. Dos ítems del mismo producto con opciones distintas (por ejemplo, talla S vs. talla M) se tratan como entradas separadas en `cart_items`.
+
+<Steps>
+  <Step title="Validar la solicitud">
+    Se valida que `product_id` exista en `products`, que `quantity` sea un entero positivo y que `options` sea un arreglo opcional.
+  </Step>
+  <Step title="Obtener o crear el carrito">
+    Se busca o crea un registro en `carts` para el usuario autenticado con `Cart::firstOrCreate(['user_id' => Auth::id()])`.
+  </Step>
+  <Step title="Buscar ítem existente con las mismas opciones">
+    Se consulta `CartItem` filtrando por `cart_id`, `product_id` y `selected_options` con comparación JSON exacta mediante `json_encode($selectedOptions)`.
+  </Step>
+  <Step title="Incrementar o crear">
+    Si el ítem existe, se incrementa la `quantity`. Si no existe, se crea un nuevo `CartItem` con las opciones serializadas.
+  </Step>
+</Steps>
+
+```php ConsumerController.php - cartAdd()
+public function cartAdd(Request $request)
+{
+    $request->validate([
+        'product_id' => 'required|exists:products,id',
+        'quantity'   => 'integer|min:1',
+        'options'    => 'nullable|array',
+    ]);
+
+    $cart = Cart::firstOrCreate(['user_id' => Auth::id()]);
+    $selectedOptions = $request->input('options', []);
+
+    $item = CartItem::where('cart_id', $cart->id)
+        ->where('product_id', $request->product_id)
+        ->where('selected_options', json_encode($selectedOptions))
+        ->first();
+
+    if ($item) {
+        $item->increment('quantity', $request->input('quantity', 1));
+    } else {
+        CartItem::create([
+            'cart_id'          => $cart->id,
+            'product_id'       => $request->product_id,
+            'quantity'         => $request->input('quantity', 1),
+            'selected_options' => $selectedOptions,
+        ]);
+    }
+
+    if ($request->wantsJson()) {
+        return response()->json([
+            'success'    => true,
+            'message'    => 'Producto agregado al carrito.',
+            'cart_count' => $cart->items()->sum('quantity'),
+        ]);
+    }
+
+    return back()->with('success', 'Producto agregado al carrito.');
+}
+```
+
+<Note>
+  El campo `selected_options` se almacena como JSON en la base de datos. El modelo `CartItem` lo castea automáticamente a arreglo PHP gracias a `'selected_options' => 'array'` en sus `$casts`.
+</Note>
+
+### Actualizar y eliminar ítems
+
+Antes de modificar o eliminar un `CartItem`, el controlador verifica que el carrito pertenezca al usuario autenticado. Si no, aborta con un `403`.
+
+```php ConsumerController.php - cartUpdate() y cartRemove()
+public function cartUpdate(Request $request, CartItem $item)
+{
+    $request->validate(['quantity' => 'required|integer|min:1']);
+    if ($item->cart->user_id !== Auth::id()) abort(403);
+    $item->update(['quantity' => $request->quantity]);
+    return back()->with('success', 'Carrito actualizado.');
+}
+
+public function cartRemove(CartItem $item)
+{
+    if ($item->cart->user_id !== Auth::id()) abort(403);
+    $item->delete();
+    return back()->with('success', 'Producto eliminado.');
+}
+```
+
+---
+
+## Proceso de pago (Checkout)
+
+El checkout es la operación más compleja del módulo. Incluye el sistema de fidelización, la transacción de base de datos, el decremento de stock y las notificaciones a comerciantes.
+
+### Pantalla de checkout (`checkoutShow`)
+
+Antes de mostrar el formulario, calcula los puntos de fidelización disponibles del usuario para los comerciantes presentes en el carrito.
+
+```php ConsumerController.php - checkoutShow()
+public function checkoutShow()
+{
+    $cart = Auth::user()->cart()->with('items.product')->firstOrFail();
+    if ($cart->items->isEmpty()) return redirect()->route('consumer.cart');
+
+    $merchantIds     = $cart->items->pluck('product.merchant_id')->unique();
+    $availablePoints = \App\Models\LoyaltyPoint::where('user_id', Auth::id())
+        ->whereIn('merchant_id', $merchantIds)
+        ->sum('points');
+
+    return view('consumer.checkout', compact('cart', 'availablePoints'));
+}
+```
+
+### Procesar el pedido (`checkoutProcess`)
+
+<Steps>
+  <Step title="Validar la solicitud">
+    Campos requeridos: `shipping_address`, `payment_method` (`card|transfer|cash`) y `card_number` (requerido sólo si `payment_method = card`).
+  </Step>
+  <Step title="Calcular el descuento por puntos">
+    Si el consumidor activa `use_points`, cada punto vale **$50 COP**. El descuento máximo es el total del pedido. Los puntos se deducen proporcionalmente de cada comerciante involucrado.
+  </Step>
+  <Step title="Ejecutar la transacción DB">
+    Todo el bloque `DB::transaction()` es atómico: creación del `Order`, creación de `OrderItem` por ítem, decremento de stock, asignación de puntos ganados y notificaciones.
+  </Step>
+  <Step title="Decrementar stock y disparar eventos">
+    Por cada ítem se llama a `$item->product->decrement('stock', $item->quantity)`. Si el stock llega a 0, se dispara el evento `ProductOutOfStock`.
+  </Step>
+  <Step title="Calcular puntos ganados">
+    El consumidor gana **1 punto por cada $1.000 COP** gastados (netos, después del descuento). Los puntos se asignan por comerciante usando `LoyaltyPoint::updateOrCreate()`.
+  </Step>
+  <Step title="Notificar a comerciantes">
+    Se envía una `NewOrderNotification` a cada comerciante cuyos productos estén en el pedido.
+  </Step>
+  <Step title="Limpiar el carrito">
+    Se eliminan todos los `CartItem` y el `Cart` del usuario. Un nuevo carrito se creará en la siguiente visita a `cartIndex` gracias a `firstOrCreate`.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php ConsumerController.php - checkoutProcess() (transacción)
+DB::transaction(function () use ($cart, $request, $total, $discount) {
+    $order = Order::create([
+        'user_id'          => Auth::id(),
+        'total'            => $total - $discount,
+        'discount'         => $discount,
+        'points_used'      => $discount / 50,
+        'status'           => 'pending',
+        'shipping_address' => strip_tags($request->shipping_address),
+        'payment_method'   => $request->payment_method,
+        'payment_status'   => 'paid',
+    ]);
+
+    $merchantSubtotals = [];
+    foreach ($cart->items as $item) {
+        OrderItem::create([
+            'order_id'         => $order->id,
+            'product_id'       => $item->product_id,
+            'quantity'         => $item->quantity,
+            'price'            => $item->product->price,
+            'selected_options' => $item->selected_options,
+        ]);
+
+        $item->product->decrement('stock', $item->quantity);
+        if ($item->product->fresh()->stock <= 0) {
+            event(new \App\Events\ProductOutOfStock($item->product));
+        }
+
+        $mId   = $item->product->merchant_id;
+        $ratio = ($total > 0) ? (($total - $discount) / $total) : 1;
+        $netSubtotal = ($item->quantity * $item->product->price) * $ratio;
+        $merchantSubtotals[$mId] = ($merchantSubtotals[$mId] ?? 0) + $netSubtotal;
+    }
+
+    $totalPointsEarned = 0;
+    foreach ($merchantSubtotals as $mId => $subtotal) {
+        $points = floor($subtotal / 1000); // 1 punto por cada $1.000 COP
+        if ($points > 0) {
+            $totalPointsEarned += $points;
+            \App\Models\LoyaltyPoint::updateOrCreate(
+                ['user_id' => Auth::id(), 'merchant_id' => $mId],
+                ['points'  => \Illuminate\Support\Facades\DB::raw("points + $points")]
+            );
+        }
+    }
+
+    $order->update(['points_earned' => $totalPointsEarned]);
+
+    $merchantIds = $cart->items->pluck('product.merchant_id')->unique();
+    foreach ($merchantIds as $mId) {
+        $m = User::find($mId);
+        if ($m) $m->notify(new \App\Notifications\NewOrderNotification($order));
+    }
+
+    $cart->items()->delete();
+    $cart->delete();
+});
+```
+
+```php ConsumerController.php - descuento por puntos
+if ($request->boolean('use_points') && $availablePoints > 0) {
+    $potentialDiscount = $availablePoints * 50; // 1 punto = $50 COP
+    $discount = min($potentialDiscount, $total);
+
+    $remainingDiscountToApply = $discount;
+    $loyaltyRecords = \App\Models\LoyaltyPoint::where('user_id', Auth::id())
+        ->whereIn('merchant_id', $merchantIds)
+        ->where('points', '>', 0)
+        ->get();
+
+    foreach ($loyaltyRecords as $lr) {
+        if ($remainingDiscountToApply <= 0) break;
+
+        $pointsForThisMerchantValue = $lr->points * 50;
+        if ($pointsForThisMerchantValue <= $remainingDiscountToApply) {
+            $remainingDiscountToApply -= $pointsForThisMerchantValue;
+            $lr->update(['points' => 0]);
+        } else {
+            $pointsToDeduct = ceil($remainingDiscountToApply / 50);
+            $lr->decrement('points', $pointsToDeduct);
+            $remainingDiscountToApply = 0;
+        }
+    }
+}
+```
+</CodeGroup>
+
+<Info>
+  Los puntos de fidelización son **por comerciante**: los puntos acumulados en la tienda A no se pueden usar en la tienda B. La deducción y la asignación respetan esta separación.
+</Info>
+
+---
+
+## Pedidos y recibo
+
+### Historial de pedidos (`orders`)
+
+Lista todos los pedidos del usuario autenticado, paginados de 10 en 10, ordenados del más reciente al más antiguo.
+
+```php ConsumerController.php - orders()
+public function orders()
+{
+    $orders = Order::where('user_id', Auth::id())
+        ->with('items.product')
+        ->latest()
+        ->paginate(10);
+    return view('consumer.orders', compact('orders'));
+}
+```
+
+### Recibo (`receipt`)
+
+Carga el pedido con sus ítems, productos, comerciantes y perfiles de empresa. También muestra el total acumulado de puntos de fidelización del usuario.
+
+```php ConsumerController.php - receipt()
+public function receipt($id)
+{
+    $order = Order::where('user_id', Auth::id())
+        ->with(['items.product.merchant.companyProfile'])
+        ->findOrFail($id);
+
+    $userPoints = \App\Models\LoyaltyPoint::where('user_id', Auth::id())->sum('points');
+
+    return view('consumer.receipt', compact('order', 'userPoints'));
+}
+```
+
+---
+
+## Perfil del consumidor
+
+### Ver perfil (`profile`)
+
+Carga el usuario y sus puntos de fidelización activos (con más de 0 puntos), agrupados por comerciante.
+
+```php ConsumerController.php - profile()
+public function profile()
+{
+    $user = Auth::user();
+    $loyaltyPoints = \App\Models\LoyaltyPoint::where('user_id', $user->id)
+        ->with('merchant.companyProfile')
+        ->where('points', '>', 0)
+        ->get();
+    return view('consumer.profile', compact('user', 'loyaltyPoints'));
+}
+```
+
+### Actualizar perfil (`updateProfile`)
+
+Permite editar nombre, correo, teléfono, dirección y avatar. El avatar se almacena en el disco `public` bajo `avatars/` y el campo `users.avatar` se actualiza con la ruta relativa.
+
+```php ConsumerController.php - updateProfile()
+public function updateProfile(Request $request)
+{
+    $data = $request->validate([
+        'name'    => 'required|string|max:255',
+        'email'   => 'required|email|unique:users,email,' . Auth::id(),
+        'phone'   => 'nullable|string|max:50',
+        'address' => 'nullable|string|max:255',
+        'avatar'  => 'nullable|image|max:2048',
+    ]);
+
+    $user = Auth::user();
+    $updateData = [
+        'name'    => strip_tags($data['name']),
+        'email'   => strip_tags($data['email']),
+        'phone'   => strip_tags($data['phone'] ?? ''),
+        'address' => strip_tags($data['address'] ?? ''),
+    ];
+
+    if ($request->hasFile('avatar')) {
+        $path = $request->file('avatar')->store('avatars', 'public');
+        $updateData['avatar'] = $path;
+    }
+
+    $user->update($updateData);
+    return redirect()->route('account.profile')->with('success', 'Perfil actualizado.');
+}
+```
+
+<Note>
+  La ruta para actualizar el perfil es `PUT /account/profile` (`account.profile.update`), compartida con otros roles. Cualquier usuario autenticado puede acceder a ella, no sólo los consumidores.
+</Note>
+
+---
+
+## Reseñas verificadas (`productReview`)
+
+FusaShop garantiza que sólo los compradores reales puedan opinar. Antes de crear la reseña, el sistema verifica que el usuario tenga un pedido con `status = 'delivered'` que incluya el producto.
+
+<Steps>
+  <Step title="Validar la reseña">
+    Se valida que `rating` sea un entero entre 1 y 5 y que `comment` sea un texto de máximo 1.000 caracteres.
+  </Step>
+  <Step title="Verificar la compra">
+    Se consulta si existe un `Order` del usuario con `status = 'delivered'` que tenga un `OrderItem` con el `product_id` en cuestión. Si no existe, se aborta con `403`.
+  </Step>
+  <Step title="Crear la reseña">
+    Se crea un registro en `reviews` con `product_id`, `user_id`, `rating` y `comment` (saneado con `strip_tags`).
+  </Step>
+  <Step title="Notificar al comerciante">
+    Se envía una `NewProductReview` al comerciante dueño del producto, con la reseña cargada junto a sus relaciones `product` y `user`.
+  </Step>
+</Steps>
+
+```php ConsumerController.php - productReview()
+public function productReview(Request $request, $id)
+{
+    $request->validate([
+        'rating'  => 'required|integer|min:1|max:5',
+        'comment' => 'nullable|string|max:1000',
+    ]);
+
+    $product = Product::active()->findOrFail($id);
+
+    $hasPurchased = Order::where('user_id', Auth::id())
+        ->where('status', 'delivered')
+        ->whereHas('items', fn($q) => $q->where('product_id', $id))
+        ->exists();
+
+    if (!$hasPurchased) {
+        abort(403, 'Debes comprar y recibir este producto para poder calificarlo.');
+    }
+
+    $review = Review::create([
+        'product_id' => $product->id,
+        'user_id'    => Auth::id(),
+        'rating'     => $request->rating,
+        'comment'    => strip_tags($request->comment ?? ''),
+    ]);
+
+    $merchant = User::find($product->merchant_id);
+    if ($merchant) {
+        $merchant->notify(new NewProductReview($review->load('product', 'user')));
+    }
+
+    return back()->with('success', 'Gracias por tu valoración.');
+}
+```
+
+<Warning>
+  El sistema no impide que un usuario envíe múltiples reseñas para el mismo producto si tiene más de un pedido entregado. Si necesitas limitar a una reseña por producto por usuario, agrega una restricción `unique` en la migración de `reviews`.
+</Warning>
+
+---
+
+## Resumen de funcionalidades
+
+<CardGroup cols={2}>
+  <Card title="Carrito inteligente" icon="cart-shopping" href="/modulos/consumidores">
+    Detecta duplicados por comparación JSON exacta de `selected_options`. Soporta variantes de color, talla y texto.
+  </Card>
+  <Card title="Puntos de fidelización" icon="star" href="/modulos/comerciantes">
+    Gana 1 punto por cada $1.000 COP. Un punto equivale a $50 COP de descuento. Los puntos son específicos por comerciante.
+  </Card>
+  <Card title="Reseñas verificadas" icon="check-circle" href="/modulos/consumidores">
+    Sólo los usuarios con un pedido `delivered` del producto pueden opinar, garantizando autenticidad.
+  </Card>
+  <Card title="Módulo de pagos" icon="box" href="/modulos/pagos">
+    Consulta cómo se integra PayU para el checkout y la confirmación de pedidos mediante webhook server-to-server.
+  </Card>
+</CardGroup>

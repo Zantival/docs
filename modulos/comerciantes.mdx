@@ -1,0 +1,689 @@
+---
+title: "Módulo de comerciantes: onboarding, productos y finanzas"
+sidebarTitle: "Comerciantes"
+description: "Módulo MiPyme en FusaShop: onboarding KYC, gestión de productos con variantes, inventario, pedidos, reseñas, finanzas y cupones de descuento."
+---
+
+El módulo de comerciantes (MiPyme) es la plataforma dentro de FusaShop desde la que los vendedores gestionan su tienda. Cubre el proceso de verificación de identidad (KYC), la publicación y edición de productos con variantes y galería, la actualización masiva de inventario, el ciclo de vida de pedidos con asignación de puntos de fidelización, el análisis financiero y la creación de cupones promocionales. La implementación principal se encuentra en `MerchantController` y `CouponController`, en `app/Http/Controllers/Merchant/`.
+
+---
+
+## Rutas del módulo
+
+Todas las rutas comparten el prefijo `/merchant` y el middleware `auth + verified + role:merchant`. Las rutas que requieren KYC aprobado están protegidas adicionalmente por el middleware `EnsureKycApproved`.
+
+### Rutas de onboarding (sin KYC requerido)
+
+| Método | URI | Nombre de ruta | Descripción |
+|--------|-----|----------------|-------------|
+| `GET` | `/merchant/profile` | `merchant.profile` | Formulario de perfil / onboarding |
+| `POST` | `/merchant/profile` | `merchant.profile.store` | Guardar perfil y documentos KYC |
+| `GET` | `/merchant/support/contact` | `merchant.support.contact` | Contactar soporte |
+
+### Rutas protegidas por KYC (`EnsureKycApproved`)
+
+| Método | URI | Nombre de ruta | Descripción |
+|--------|-----|----------------|-------------|
+| `GET` | `/merchant/dashboard` | `merchant.dashboard` | Panel principal |
+| `GET` | `/merchant/store/edit` | `merchant.store.edit` | Editar información de tienda |
+| `GET` | `/merchant/products` | `merchant.products` | Listar productos |
+| `GET` | `/merchant/products/create` | `merchant.products.create` | Formulario de nuevo producto |
+| `POST` | `/merchant/products` | `merchant.products.store` | Crear producto |
+| `GET` | `/merchant/products/{product}/edit` | `merchant.products.edit` | Editar producto |
+| `PUT` | `/merchant/products/{product}` | `merchant.products.update` | Actualizar producto |
+| `DELETE` | `/merchant/products/{product}` | `merchant.products.delete` | Eliminar producto |
+| `GET` | `/merchant/inventory` | `merchant.inventory` | Ver inventario |
+| `POST` | `/merchant/inventory` | `merchant.inventory.update` | Actualización masiva de stock |
+| `GET` | `/merchant/orders` | `merchant.orders` | Listar pedidos |
+| `PATCH` | `/merchant/orders/{order}/status` | `merchant.orders.update` | Cambiar estado de pedido |
+| `GET` | `/merchant/reviews` | `merchant.reviews` | Ver reseñas |
+| `POST` | `/merchant/reviews/{review}/reply` | `merchant.reviews.reply` | Responder reseña |
+| `GET` | `/merchant/finances` | `merchant.finances` | Reporte financiero |
+| `GET` | `/merchant/banner-request` | `merchant.banner.request` | Formulario de solicitud de banner |
+| `POST` | `/merchant/banner-request` | `merchant.banner.request.store` | Enviar solicitud de banner |
+
+---
+
+## Onboarding y KYC
+
+El proceso de incorporación (`onboarding`) es obligatorio antes de que el comerciante pueda publicar productos o acceder al dashboard. Consiste en completar el perfil de empresa y subir documentos legales para su revisión por un analista.
+
+### Documentos requeridos
+
+<CardGroup cols={2}>
+  <Card title="RUT" icon="file-pdf" href="/modulos/comerciantes">
+    Archivo PDF. Se almacena en disco `local` (privado) con nombre `{uuid}_rut.pdf` en la carpeta `kyc/`.
+  </Card>
+  <Card title="Cámara de Comercio" icon="building" href="/modulos/comerciantes">
+    Archivo PDF, JPG, JPEG o PNG. Se almacena en disco `local` con nombre `{uuid}_camara.{ext}` en la carpeta `kyc/`.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Ambos documentos se guardan en el disco `local` de Laravel (no en `public`), lo que los hace inaccesibles directamente desde el navegador. Sólo los analistas pueden verlos desde el panel de administración.
+</Warning>
+
+### Flujo de `storeProfile`
+
+<Steps>
+  <Step title="Validar los datos">
+    Se valida la información del negocio: `owner_name`, `company_name`, `business_type`, `phone`, `employee_count`, `description`, `address`, `google_maps_url`, `latitude` y `longitude`. Los documentos (`rut_file` y `camara_comercio_file`) son requeridos sólo si no existen aún en el perfil.
+  </Step>
+  <Step title="Crear o actualizar el perfil">
+    Si el comerciante ya tiene un `CompanyProfile`, se actualiza. Si no, se instancia uno nuevo vinculado al `merchant_id`.
+  </Step>
+  <Step title="Subir documentos KYC">
+    Si se envía un nuevo `rut_file`, se borra el archivo anterior y se guarda el nuevo con un nombre UUID. Lo mismo para `camara_comercio_file`. Al subir cualquier documento, `kyc_status` se restablece a `'pending'`.
+  </Step>
+  <Step title="Subir logo y banners">
+    El logo se almacena en disco `public` bajo `merchants/logos/`. Los banners se almacenan en `merchants/banners/` con títulos y subtítulos opcionales como JSON.
+  </Step>
+  <Step title="Notificar a analistas">
+    Si `kyc_status` queda en `'pending'`, se envía una `NewMerchantProfileNotification` a todos los analistas para que revisen los documentos.
+  </Step>
+</Steps>
+
+<CodeGroup>
+```php MerchantController.php - storeProfile() (documentos KYC)
+if ($request->hasFile('rut_file')) {
+    if ($profile->rut_path) {
+        Storage::delete($profile->rut_path);
+    }
+    $profile->rut_path = $request->file('rut_file')
+        ->storeAs('kyc', Str::uuid() . '_rut.pdf', 'local');
+    $profile->kyc_status = 'pending';
+}
+
+if ($request->hasFile('camara_comercio_file')) {
+    if ($profile->camara_comercio_path) {
+        Storage::delete($profile->camara_comercio_path);
+    }
+    $ext = $request->file('camara_comercio_file')->getClientOriginalExtension();
+    $profile->camara_comercio_path = $request->file('camara_comercio_file')
+        ->storeAs('kyc', Str::uuid() . '_camara.' . $ext, 'local');
+    $profile->kyc_status = 'pending';
+}
+```
+
+```php MerchantController.php - notificación a analistas
+$profile->save();
+
+if ($profile->kyc_status === 'pending') {
+    $analysts = \App\Models\User::where('role', 'analyst')->get();
+    foreach ($analysts as $analyst) {
+        $analyst->notify(new \App\Notifications\NewMerchantProfileNotification($profile));
+    }
+}
+```
+</CodeGroup>
+
+### Middleware `EnsureKycApproved`
+
+Este middleware actúa como portero de todas las rutas productivas del comerciante. Si el perfil no existe o `kyc_status` no es `'approved'`, redirige al formulario de perfil con un mensaje de error.
+
+```php EnsureKycApproved.php
+public function handle(Request $request, Closure $next)
+{
+    $user = Auth::user();
+    if ($user && $user->isMerchant()) {
+        if (!$user->companyProfile) {
+            return redirect()->route('merchant.profile')
+                ->with('info', 'Por favor completa la configuración de tu perfil comercial.');
+        }
+        if ($user->companyProfile->kyc_status !== 'approved') {
+            return redirect()->route('merchant.profile')
+                ->with('error', 'Tu cuenta está bajo revisión o no ha sido aprobada. Por favor espera a que un Analista valide tu RUT.');
+        }
+    }
+    return $next($request);
+}
+```
+
+<Tabs>
+  <Tab title="pending">
+    El analista aún no ha revisado los documentos. El comerciante ve el mensaje de espera y no puede acceder a ninguna ruta KYC-protegida.
+  </Tab>
+  <Tab title="approved">
+    KYC aprobado. Acceso completo al dashboard, productos, pedidos y finanzas.
+  </Tab>
+  <Tab title="rejected">
+    El analista rechazó los documentos. El comerciante debe corregir y volver a subir los archivos, lo que restablece el estado a `pending`.
+  </Tab>
+</Tabs>
+
+---
+
+## Gestión de productos
+
+### Crear producto (`productStore`)
+
+Los productos soportan imagen principal, galería de fotos y variantes (`available_options`) con dos tipos: **texto** (tallas, materiales) y **color** (con código hex e imagen opcional de la variante).
+
+```php MerchantController.php - productStore() (opciones y variantes)
+$availableOptions = [];
+if ($request->filled('options')) {
+    foreach ($request->options as $index => $opt) {
+        if (!empty($opt['name'])) {
+            $optionData = [
+                'name'   => strip_tags($opt['name']),
+                'type'   => $opt['type'] ?? 'text',
+                'values' => [],
+            ];
+
+            if ($optionData['type'] === 'color' && isset($opt['color_values'])) {
+                foreach ($opt['color_values'] as $vIndex => $v) {
+                    $val = [
+                        'name' => strip_tags($v['name']),
+                        'hex'  => strip_tags($v['hex'] ?? '#000000'),
+                    ];
+                    if ($request->hasFile("options.$index.color_values.$vIndex.image")) {
+                        $val['image'] = $request->file("options.$index.color_values.$vIndex.image")
+                            ->store('products/variants', 'public');
+                    }
+                    $optionData['values'][] = $val;
+                }
+            } else {
+                $rawValues = $opt['values'] ?? '';
+                $vals = is_array($rawValues) ? $rawValues : explode(',', $rawValues);
+                $optionData['values'] = array_map('trim', array_map('strip_tags', array_filter($vals)));
+            }
+
+            $availableOptions[] = $optionData;
+        }
+    }
+}
+
+Auth::user()->products()->create([
+    'name'              => strip_tags($data['name']),
+    'slug'              => Str::slug($data['name']) . '-' . uniqid(),
+    'description'       => strip_tags($data['description'] ?? ''),
+    'price'             => $data['price'],
+    'stock'             => $data['stock'],
+    'category'          => strip_tags($data['category']),
+    'image'             => $imagePath,
+    'images'            => $galleryPaths,
+    'available_options' => $availableOptions,
+    'specifications'    => $request->specs,
+    'is_active'         => $request->boolean('is_active', true),
+]);
+```
+
+<Accordion title="Estructura JSON de available_options">
+  El campo `available_options` del modelo `Product` se castea a `array`. Ejemplo de una opción de texto y una de color:
+
+  ```json available_options example
+  [
+    {
+      "name": "Talla",
+      "type": "text",
+      "values": ["S", "M", "L", "XL"]
+    },
+    {
+      "name": "Color",
+      "type": "color",
+      "values": [
+        { "name": "Rojo", "hex": "#FF0000", "image": "products/variants/abc123.jpg" },
+        { "name": "Azul", "hex": "#0000FF" }
+      ]
+    }
+  ]
+  ```
+</Accordion>
+
+<Accordion title="Estructura JSON de specifications">
+  El campo `specifications` acepta un arreglo libre de pares clave-valor para especificaciones técnicas:
+
+  ```json specifications example
+  {
+    "Material": "100% algodón",
+    "Peso": "250 g",
+    "País de origen": "Colombia"
+  }
+  ```
+</Accordion>
+
+### Campos de validación al crear/editar producto
+
+<ParamField body="name" type="string" required>
+  Nombre del producto. Máximo 255 caracteres.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Descripción detallada. Máximo 2.000 caracteres.
+</ParamField>
+
+<ParamField body="price" type="numeric" required>
+  Precio en COP. Debe ser mayor o igual a 0.
+</ParamField>
+
+<ParamField body="stock" type="integer" required>
+  Cantidad disponible en inventario. Mínimo 0.
+</ParamField>
+
+<ParamField body="category" type="string" required>
+  Categoría del producto. Máximo 100 caracteres.
+</ParamField>
+
+<ParamField body="image" type="file">
+  Imagen principal. Formatos: `jpg`, `jpeg`, `png`, `webp`. Máximo 2 MB.
+</ParamField>
+
+<ParamField body="gallery[]" type="file[]">
+  Galería de imágenes adicionales. Mismos formatos y límite que `image`.
+</ParamField>
+
+<ParamField body="options" type="array">
+  Variantes del producto (texto o color). Ver estructura JSON arriba.
+</ParamField>
+
+<ParamField body="specs" type="array">
+  Especificaciones técnicas como pares clave-valor.
+</ParamField>
+
+<ParamField body="is_active" type="boolean">
+  Visibilidad del producto en la tienda. Por defecto `true`.
+</ParamField>
+
+### Eliminar producto (`productDelete`)
+
+Antes de eliminar, verifica que el producto pertenezca al comerciante autenticado. Borra la imagen principal del disco `public` y luego elimina el registro.
+
+```php MerchantController.php - productDelete()
+public function productDelete(Product $product)
+{
+    if ($product->merchant_id !== Auth::id()) abort(403);
+    if ($product->image) Storage::disk('public')->delete($product->image);
+    $product->delete();
+    return back()->with('success', 'Producto eliminado.');
+}
+```
+
+---
+
+## Gestión de inventario
+
+El módulo de inventario permite actualizar el stock de múltiples productos en una sola operación POST.
+
+```php MerchantController.php - updateInventory()
+public function updateInventory(Request $request)
+{
+    $data = $request->validate([
+        'stocks'   => 'required|array',
+        'stocks.*' => 'required|integer|min:0',
+    ]);
+
+    $merchantId = Auth::id();
+    foreach ($data['stocks'] as $productId => $stock) {
+        Product::where('id', $productId)
+               ->where('merchant_id', $merchantId)
+               ->update(['stock' => $stock]);
+    }
+
+    return redirect()->route('merchant.inventory')
+        ->with('success', 'Inventario actualizado rápidamente.');
+}
+```
+
+<Note>
+  La condición `->where('merchant_id', $merchantId)` asegura que un comerciante no pueda modificar el stock de productos de otro comerciante, incluso si manipula el formulario.
+</Note>
+
+---
+
+## Gestión de pedidos
+
+### Listar pedidos (`orders`)
+
+Recupera todos los pedidos que contienen al menos un producto del comerciante autenticado, con paginación de 10 por página.
+
+```php MerchantController.php - orders()
+public function orders()
+{
+    $productIds = Auth::user()->products()->pluck('id');
+    $orders = Order::whereHas('items', fn($q) => $q->whereIn('product_id', $productIds))
+                   ->with('user', 'items.product')
+                   ->latest()
+                   ->paginate(10);
+    return view('merchant.orders', compact('orders'));
+}
+```
+
+### Actualizar estado de pedido (`orderUpdate`)
+
+El ciclo de vida de un pedido sigue la secuencia: `pending → processing → shipped → delivered → cancelled`.
+
+<Steps>
+  <Step title="Validar el estado">
+    Se valida que el nuevo estado sea uno de: `pending`, `processing`, `shipped`, `delivered`, `cancelled`.
+  </Step>
+  <Step title="Asignar puntos de fidelización (solo al marcar 'delivered')">
+    Si el nuevo estado es `delivered` y el pedido no estaba ya en ese estado, se calculan y asignan puntos de fidelización al consumidor: **1 punto por cada $1.000 COP** del subtotal de los ítems del comerciante en ese pedido.
+  </Step>
+  <Step title="Actualizar el pedido">
+    Se actualiza `orders.status` con el nuevo valor.
+  </Step>
+  <Step title="Notificar al consumidor">
+    Se envía una notificación `OrderStatusChanged` al usuario que realizó el pedido.
+  </Step>
+</Steps>
+
+```php MerchantController.php - orderUpdate()
+public function orderUpdate(Request $request, Order $order)
+{
+    $request->validate([
+        'status' => 'required|in:pending,processing,shipped,delivered,cancelled',
+    ]);
+
+    if ($request->status === 'delivered' && $order->status !== 'delivered') {
+        $merchantId  = Auth::id();
+        $orderPoints = 0;
+        foreach ($order->items as $item) {
+            if ($item->product && $item->product->merchant_id === $merchantId) {
+                $orderPoints += floor(($item->quantity * $item->price) / 1000);
+            }
+        }
+
+        if ($orderPoints > 0) {
+            $loyalty = \App\Models\LoyaltyPoint::firstOrCreate(
+                ['user_id' => $order->user_id, 'merchant_id' => $merchantId],
+                ['points'  => 0]
+            );
+            $loyalty->increment('points', $orderPoints);
+        }
+    }
+
+    $order->update(['status' => $request->status]);
+    $order->user->notify(new OrderStatusChanged($order));
+
+    return back()->with('success', 'Estado actualizado.');
+}
+```
+
+<Info>
+  Los puntos sólo se asignan **una vez**, cuando el pedido pasa a `delivered`. Si el comerciante cambia el estado de regreso (por ejemplo a `shipped`), los puntos no se revierten automáticamente.
+</Info>
+
+---
+
+## Reseñas y respuestas
+
+### Ver reseñas (`reviews`)
+
+Lista todas las reseñas de los productos del comerciante, con usuario y producto cargados. También calcula la calificación promedio.
+
+```php MerchantController.php - reviews()
+public function reviews()
+{
+    $productIds = Auth::user()->products()->pluck('id');
+    $reviews    = Review::whereIn('product_id', $productIds)
+                        ->with('user', 'product')
+                        ->latest()
+                        ->paginate(20);
+    $avgRating  = Review::whereIn('product_id', $productIds)->avg('rating') ?? 0;
+    return view('merchant.reviews', compact('reviews', 'avgRating'));
+}
+```
+
+### Responder a una reseña (`replyToReview`)
+
+El comerciante puede dejar una respuesta pública. El método verifica que la reseña pertenezca a uno de sus productos antes de guardar.
+
+```php MerchantController.php - replyToReview()
+public function replyToReview(Request $request, Review $review)
+{
+    $request->validate(['merchant_reply' => 'required|string|max:1000']);
+
+    $productIds = Auth::user()->products()->pluck('id')->toArray();
+    if (!in_array($review->product_id, $productIds)) {
+        abort(403);
+    }
+
+    $review->update([
+        'merchant_reply' => strip_tags($request->merchant_reply),
+        'replied_at'     => now(),
+    ]);
+
+    return back()->with('success', 'Respuesta enviada exitosamente.');
+}
+```
+
+---
+
+## Finanzas
+
+La vista de finanzas calcula tres métricas clave para determinar el ingreso neto real del comerciante.
+
+| Métrica | Descripción | Fórmula |
+|---------|-------------|---------|
+| **Ventas brutas** | Suma de `cantidad × precio` de todos los ítems vendidos | `Σ (item.quantity × item.price)` |
+| **Descuentos por puntos** | Porción del descuento de puntos atribuible al comerciante, calculada proporcionalmente | `order.discount × (merchantSubtotal / orderGross)` |
+| **Gasto en publicidad** | Suma del campo `cost` de todas las `BannerRequest` aprobadas del comerciante | `Σ BannerRequest.cost WHERE status = 'approved'` |
+| **Ingreso neto real** | `Ventas brutas − Descuentos por puntos − Gasto en publicidad` | `grossSales − pointsDiscounts − adSpend` |
+
+```php MerchantController.php - finances()
+public function finances()
+{
+    $merchant   = Auth::user();
+    $productIds = $merchant->products()->pluck('id');
+    $orders     = Order::whereHas('items', fn($q) => $q->whereIn('product_id', $productIds))
+                       ->with('items')->get();
+
+    $grossSales     = 0;
+    $pointsDiscounts = 0;
+    $prodIdsArr      = $productIds->toArray();
+
+    foreach ($orders as $order) {
+        $merchantTotal = 0;
+        foreach ($order->items as $item) {
+            if (in_array($item->product_id, $prodIdsArr)) {
+                $merchantTotal += $item->quantity * $item->price;
+            }
+        }
+        $grossSales += $merchantTotal;
+
+        $orderGross = $order->total + $order->discount;
+        if ($orderGross > 0) {
+            $proportion       = $merchantTotal / $orderGross;
+            $pointsDiscounts += $order->discount * $proportion;
+        }
+    }
+
+    $adSpend = BannerRequest::where('user_id', $merchant->id)
+                            ->where('status', 'approved')
+                            ->sum('cost');
+
+    $lowStockProducts = $merchant->products()
+                                 ->where('stock', '<=', 5)
+                                 ->orderBy('stock', 'asc')
+                                 ->get();
+
+    $realIncome = $grossSales - $pointsDiscounts - $adSpend;
+
+    return view('merchant.finances', compact(
+        'grossSales', 'pointsDiscounts', 'adSpend', 'realIncome', 'lowStockProducts'
+    ));
+}
+```
+
+<Tip>
+  La vista de finanzas también incluye `$lowStockProducts`: productos con 5 unidades o menos en stock, ordenados de menor a mayor, para que el comerciante tome acción antes de quedarse sin inventario.
+</Tip>
+
+---
+
+## Solicitudes de banner publicitario
+
+El comerciante puede solicitar que su contenido aparezca en los banners globales de la tienda. El flujo es:
+
+<Steps>
+  <Step title="Subir la creatividad">
+    Se envía un archivo de imagen o video (`jpg`, `jpeg`, `png`, `webp`, `mp4`, `webm`, `mov`, máximo 10 MB) junto con notas opcionales. El archivo se almacena en `banners/requests/` en disco `public`.
+  </Step>
+  <Step title="Crear la solicitud">
+    Se crea un registro `BannerRequest` con `status = 'pending'` y un campo `payment_proof_path` que simula el pago en línea.
+  </Step>
+  <Step title="Notificar a analistas">
+    Se envía una `BannerRequestNotification` a todos los analistas para que revisen y aprueben o rechacen la solicitud.
+  </Step>
+</Steps>
+
+```php MerchantController.php - bannerRequestStore()
+public function bannerRequestStore(Request $request)
+{
+    $request->validate([
+        'image' => 'required|file|mimes:jpg,jpeg,png,webp,mp4,webm,mov|max:10240',
+        'notes' => 'nullable|string|max:1000',
+    ]);
+
+    $imagePath   = $request->file('image')->store('banners/requests', 'public');
+    $paymentPath = 'paid_online_' . time();
+
+    $bannerRequest = \App\Models\BannerRequest::create([
+        'user_id'            => Auth::id(),
+        'image_path'         => $imagePath,
+        'payment_proof_path' => $paymentPath,
+        'notes'              => strip_tags($request->notes),
+        'status'             => 'pending',
+    ]);
+
+    $analysts = \App\Models\User::where('role', 'analyst')->get();
+    foreach ($analysts as $analyst) {
+        $analyst->notify(new \App\Notifications\BannerRequestNotification($bannerRequest));
+    }
+
+    return redirect()->route('merchant.store.edit')
+        ->with('success', 'Solicitud de banner enviada y pagada correctamente.');
+}
+```
+
+---
+
+## Cupones de descuento (`CouponController`)
+
+El controlador `CouponController` gestiona los cupones promocionales del comerciante. Cada cupón pertenece exclusivamente a quien lo creó.
+
+### Campos del modelo `Coupon`
+
+<ParamField body="code" type="string" required>
+  Código único del cupón. Máximo 20 caracteres. Se valida `unique:coupons,code`.
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Tipo de descuento: `fixed` (valor fijo en COP) o `percentage` (porcentaje del total).
+</ParamField>
+
+<ParamField body="value" type="numeric" required>
+  Valor del descuento. Para `fixed`, es el monto en COP; para `percentage`, es el porcentaje (0–100).
+</ParamField>
+
+<ParamField body="min_order_amount" type="numeric">
+  Monto mínimo del pedido para que el cupón sea válido.
+</ParamField>
+
+<ParamField body="expires_at" type="date">
+  Fecha de expiración. Debe ser posterior a hoy.
+</ParamField>
+
+<ParamField body="usage_limit" type="integer">
+  Número máximo de usos permitidos. Si se omite, el cupón no tiene límite de uso.
+</ParamField>
+
+### Operaciones CRUD
+
+<CodeGroup>
+```php CouponController.php - index()
+public function index()
+{
+    $coupons = Coupon::where('merchant_id', Auth::id())->latest()->get();
+    return view('merchant.coupons.index', compact('coupons'));
+}
+```
+
+```php CouponController.php - store()
+public function store(Request $request)
+{
+    $data = $request->validate([
+        'code'             => 'required|string|unique:coupons,code|max:20',
+        'type'             => 'required|in:fixed,percentage',
+        'value'            => 'required|numeric|min:0',
+        'min_order_amount' => 'nullable|numeric|min:0',
+        'expires_at'       => 'nullable|date|after:today',
+        'usage_limit'      => 'nullable|integer|min:1',
+    ]);
+
+    $data['merchant_id'] = Auth::id();
+    Coupon::create($data);
+
+    return redirect()->back()->with('success', 'Cupón creado correctamente.');
+}
+```
+
+```php CouponController.php - toggle() y destroy()
+public function toggle($id)
+{
+    $coupon = Coupon::where('merchant_id', Auth::id())->findOrFail($id);
+    $coupon->is_active = !$coupon->is_active;
+    $coupon->save();
+    return redirect()->back()->with('success', 'Estado del cupón actualizado.');
+}
+
+public function destroy($id)
+{
+    $coupon = Coupon::where('merchant_id', Auth::id())->findOrFail($id);
+    $coupon->delete();
+    return redirect()->back()->with('success', 'Cupón eliminado.');
+}
+```
+</CodeGroup>
+
+### Lógica de validación del cupón (`Coupon::isValid`)
+
+El modelo `Coupon` expone el método `isValid($orderTotal)` para verificar si un cupón puede aplicarse a un pedido:
+
+```php Coupon.php - isValid() y calculateDiscount()
+public function isValid($orderTotal)
+{
+    if (!$this->is_active)                                  return false;
+    if ($this->expires_at && $this->expires_at->isPast())   return false;
+    if ($this->usage_limit && $this->used_count >= $this->usage_limit) return false;
+    if ($orderTotal < $this->min_order_amount)              return false;
+    return true;
+}
+
+public function calculateDiscount($orderTotal)
+{
+    if ($this->type === 'fixed') {
+        return min($this->value, $orderTotal);
+    }
+    return ($orderTotal * $this->value) / 100;
+}
+```
+
+<Note>
+  El campo `used_count` en el modelo `Coupon` rastrea cuántas veces se ha canjeado el cupón. Asegúrate de incrementarlo cada vez que se aplique exitosamente en el checkout.
+</Note>
+
+---
+
+## Resumen de capacidades del módulo
+
+<CardGroup cols={2}>
+  <Card title="KYC con documentos privados" icon="shield-check" href="/modulos/comerciantes">
+    RUT y Cámara de Comercio en almacenamiento `local` con UUID. El estado `kyc_status` controla el acceso mediante middleware.
+  </Card>
+  <Card title="Variantes de producto" icon="palette" href="/modulos/comerciantes">
+    Opciones de tipo texto (tallas, materiales) y color (hex + imagen de variante), almacenadas como JSON en `available_options`.
+  </Card>
+  <Card title="Ciclo de pedidos con fidelización" icon="arrow-trend-up" href="/modulos/consumidores">
+    Al marcar un pedido como `delivered`, el sistema asigna automáticamente 1 punto por cada $1.000 COP al consumidor.
+  </Card>
+  <Card title="Finanzas transparentes" icon="chart-bar" href="/modulos/comerciantes">
+    Ventas brutas, descuentos por puntos atribuidos al comerciante y gasto en publicidad se calculan para obtener el ingreso neto real.
+  </Card>
+  <Card title="Cupones flexibles" icon="ticket" href="/modulos/comerciantes">
+    Crea cupones de valor fijo o porcentaje con fecha de expiración, monto mínimo y límite de uso. Activa o desactiva con un clic.
+  </Card>
+  <Card title="Publicidad por banners" icon="megaphone" href="/modulos/panel-analista">
+    Solicita espacios publicitarios en la página principal. Los analistas aprueban o rechazan cada solicitud.
+  </Card>
+</CardGroup>

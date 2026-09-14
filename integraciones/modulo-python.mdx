@@ -1,0 +1,437 @@
+---
+title: "Módulo Python de análisis y ML de comerciantes en FusaShop"
+sidebarTitle: "Módulo Python"
+description: "Documenta analytics.py para reportes CLI y ml_analyzer.py que clasifica comerciantes con score compuesto, invocado desde Laravel mediante Symfony Process."
+---
+
+FusaShop incluye un módulo Python ubicado en el directorio `python/` que extiende las capacidades analíticas del panel del analista más allá de lo que Eloquent ofrece por defecto. El módulo consta de dos scripts independientes: `analytics.py`, una herramienta CLI que genera reportes de ventas, usuarios y productos consultando directamente la base de datos MySQL; y `ml_analyzer.py`, un clasificador de rendimiento de comerciantes que Laravel invoca en tiempo de ejecución a través de `Symfony\Component\Process`, pasando datos como JSON por stdin y recibiendo el resultado por stdout. Esta arquitectura permite extender la lógica analítica en Python sin acoplarla al ciclo de vida de la petición HTTP.
+
+## Scripts disponibles
+
+<CardGroup cols={2}>
+  <Card title="analytics.py" icon="chart-bar">
+    Herramienta CLI independiente. Se conecta a MySQL, ejecuta consultas
+    agregadas y exporta el resultado en JSON o CSV. Ideal para reportes
+    programados via cron o para exploración ad-hoc desde la terminal.
+  </Card>
+  <Card title="ml_analyzer.py" icon="brain">
+    Clasificador de comerciantes orientado a machine learning. Recibe un array
+    JSON por `stdin`, calcula un score compuesto (ventas + rating), clasifica
+    cada comerciante en un tier y detecta anomalías. Laravel lo invoca desde
+    `AnalystController::runMl()`.
+  </Card>
+</CardGroup>
+
+---
+
+## analytics.py — CLI de reportes
+
+### Dependencias
+
+```bash
+pip install mysql-connector-python pandas  # pandas es opcional
+```
+
+Si `mysql-connector-python` no está instalado, el script lo detecta
+automáticamente y devuelve datos de demostración predefinidos en lugar de
+lanzar un error.
+
+### Uso desde la terminal
+
+```bash title="Terminal"
+# Reporte completo en JSON (por defecto)
+python analytics.py
+
+# Solo ventas mensuales
+python analytics.py --report ventas
+
+# Usuarios registrados por rol
+python analytics.py --report usuarios
+
+# Productos y categorías más vendidas
+python analytics.py --report productos
+
+# Exportar ventas en CSV
+python analytics.py --report ventas --output csv
+
+# Conectar a una base de datos remota
+python analytics.py \
+  --host 192.168.1.100 \
+  --db fusashop_prod \
+  --user fusauser \
+  --password secreto \
+  --report all \
+  --output json
+```
+
+### Referencia de argumentos CLI
+
+<ParamField query="--report" type="string" default="all">
+  Tipo de reporte a generar. Opciones: `ventas`, `usuarios`, `productos`, `all`.
+</ParamField>
+
+<ParamField query="--output" type="string" default="json">
+  Formato de salida. Opciones: `json`, `csv`.
+</ParamField>
+
+<ParamField query="--host" type="string" default="127.0.0.1">
+  Host del servidor MySQL.
+</ParamField>
+
+<ParamField query="--db" type="string" default="fusashop">
+  Nombre de la base de datos MySQL.
+</ParamField>
+
+<ParamField query="--user" type="string" default="root">
+  Usuario de la base de datos.
+</ParamField>
+
+<ParamField query="--password" type="string" default="">
+  Contraseña del usuario de la base de datos.
+</ParamField>
+
+### Estructura de salida JSON (reporte `all`)
+
+```json title="Salida: python analytics.py --report all"
+{
+  "fusashop_analytics": {
+    "version": "1.0",
+    "generado": "2025-05-21T14:30:00.000000",
+    "ventas": {
+      "reporte": "ventas_mensuales",
+      "generado": "2025-05-21T14:30:00.000000",
+      "datos": [
+        {
+          "mes": "2025-04",
+          "total_pedidos": 31,
+          "ingresos": 4800000,
+          "ticket_promedio": 154838,
+          "ingresos_confirmados": 4650000
+        }
+      ]
+    },
+    "usuarios": {
+      "reporte": "usuarios",
+      "resumen": [
+        { "role": "consumer", "total": 45 },
+        { "role": "merchant", "total": 8 },
+        { "role": "analyst",  "total": 2 }
+      ],
+      "crecimiento": []
+    },
+    "productos": {
+      "reporte": "productos",
+      "por_categoria": [
+        {
+          "category": "Electrónica",
+          "total_productos": 4,
+          "unidades_vendidas": 120,
+          "ingresos_categoria": 9800000,
+          "precio_promedio": 80750
+        }
+      ],
+      "top_10": []
+    }
+  }
+}
+```
+
+### Reportes disponibles
+
+<Accordion title="ventas — ventas mensuales (últimos 12 meses)">
+  Consulta la tabla `orders` agrupando por mes. Devuelve `total_pedidos`,
+  `ingresos` (brutos), `ticket_promedio` e `ingresos_confirmados`
+  (solo pedidos con `payment_status = 'paid'`).
+</Accordion>
+
+<Accordion title="usuarios — distribución y crecimiento">
+  Devuelve dos conjuntos: `resumen` (totales por rol: `consumer`, `merchant`,
+  `analyst`) y `crecimiento` (nuevos usuarios por mes en los últimos 6 meses,
+  desglosado por rol).
+</Accordion>
+
+<Accordion title="productos — categorías y top 10">
+  Cruza `products` con `order_items` para calcular `unidades_vendidas`,
+  `ingresos_categoria` y `precio_promedio` por categoría. Incluye un sub-reporte
+  `top_10` con los productos más vendidos por unidades.
+</Accordion>
+
+---
+
+## ml_analyzer.py — Clasificador de comerciantes
+
+### Formato de entrada (JSON por stdin)
+
+El script espera un array JSON donde cada elemento representa un comerciante:
+
+```json title="Entrada: stdin"
+[
+  {
+    "merchant_id": 1,
+    "company_name": "Tienda Ejemplo S.A.S.",
+    "total_sales": 5200000,
+    "avg_rating": 4.3
+  },
+  {
+    "merchant_id": 2,
+    "company_name": "Distribuciones López",
+    "total_sales": 980000,
+    "avg_rating": 1.8
+  }
+]
+```
+
+<ParamField body="merchant_id" type="integer" required>
+  Identificador único del comerciante (campo `merchant_id` de `company_profiles`).
+</ParamField>
+
+<ParamField body="company_name" type="string" required>
+  Nombre de la empresa del comerciante.
+</ParamField>
+
+<ParamField body="total_sales" type="float" required>
+  Suma total de ventas del comerciante en pesos colombianos
+  (`SUM(quantity * price)` de `order_items`).
+</ParamField>
+
+<ParamField body="avg_rating" type="float" required>
+  Promedio de calificaciones de los productos del comerciante (escala 1–5).
+</ParamField>
+
+### Formato de salida (JSON por stdout)
+
+```json title="Salida: stdout"
+{
+  "status": "success",
+  "analytics": [
+    {
+      "merchant_id": 1,
+      "company_name": "Tienda Ejemplo S.A.S.",
+      "raw_score": 2080025.8,
+      "classification": "Top Performer",
+      "anomaly_detected": false
+    },
+    {
+      "merchant_id": 2,
+      "company_name": "Distribuciones López",
+      "raw_score": 392010.8,
+      "classification": "Top Performer",
+      "anomaly_detected": true
+    }
+  ]
+}
+```
+
+<ResponseField name="status" type="string">
+  `"success"` si el análisis se completó correctamente; `"error"` si ocurrió
+  una excepción, en cuyo caso el campo `message` detalla el error.
+</ResponseField>
+
+<ResponseField name="analytics" type="array">
+  Array de objetos con el resultado por comerciante.
+
+  <ResponseField name="merchant_id" type="integer">
+    ID del comerciante, idéntico al valor recibido en la entrada.
+  </ResponseField>
+  <ResponseField name="company_name" type="string">
+    Nombre de la empresa del comerciante.
+  </ResponseField>
+  <ResponseField name="raw_score" type="float">
+    Score compuesto calculado como `(total_sales * 0.4) + (avg_rating * 0.6 * 10)`.
+    Redondeado a 2 decimales.
+  </ResponseField>
+  <ResponseField name="classification" type="string">
+    Tier de clasificación. Ver tabla de niveles abajo.
+  </ResponseField>
+  <ResponseField name="anomaly_detected" type="boolean">
+    `true` si `total_sales > 1000` **y** `avg_rating < 2.0` simultáneamente.
+    Indica un comerciante con muchas ventas pero muy mal valorado.
+  </ResponseField>
+</ResponseField>
+
+### Tiers de clasificación
+
+La clasificación se basa en el `raw_score`, que pondera un 40 % las ventas totales y un 60 % el rating promedio (multiplicado por 10 para equiparar escalas):
+
+```
+raw_score = (total_sales × 0.4) + (avg_rating × 0.6 × 10)
+```
+
+| Rango de score      | Clasificación         | Descripción                                                |
+|---------------------|-----------------------|------------------------------------------------------------|
+| score mayor que 80  | **Top Performer**     | Comerciante con alto volumen de ventas y buena reputación. |
+| score mayor que 40  | **Average Performer** | Rendimiento intermedio; oportunidad de mejora.             |
+| score ≤ 40          | **Low Performer**     | Bajo volumen o baja reputación; requiere atención.         |
+
+### Detección de anomalías
+
+```python title="python/ml_analyzer.py"
+"anomaly_detected": ventas > 1000 and rating < 2.0
+```
+
+Un comerciante activa la bandera de anomalía cuando acumula más de 1 000 COP en ventas pero su calificación promedio es inferior a 2.0 sobre 5. Esto puede indicar prácticas de venta engañosas, productos de baja calidad con alto volumen, o reseñas negativas masivas.
+
+<Warning>
+  El score actual es un modelo **simplificado (mock-up)**. En un entorno de
+  producción deberías reemplazar la fórmula lineal por un modelo entrenado
+  (scikit-learn, XGBoost, etc.) y persistir el modelo en un archivo `.pkl`.
+</Warning>
+
+---
+
+## Cómo Laravel invoca ml_analyzer.py
+
+`AnalystController::runMl()` recopila los datos de todos los comerciantes desde
+la base de datos, serializa el payload como JSON y lo pasa al script Python
+a través de `Symfony\Component\Process` (disponible como dependencia transitiva
+de `laravel/framework`). El resultado se deserializa y se muestra en la vista.
+
+```php title="app/Http/Controllers/Analyst/AnalystController.php"
+use Symfony\Component\Process\Process;
+
+public function runMl()
+{
+    // 1. Construir el payload con datos reales de la BD
+    $merchants = CompanyProfile::with('user.products.reviews')->get();
+    $payload = [];
+
+    foreach ($merchants as $m) {
+        $productIds = $m->user ? $m->user->products->pluck('id') : collect();
+        $totalSales = OrderItem::whereIn('product_id', $productIds)
+                               ->sum(DB::raw('quantity * price'));
+        $avgRating  = Review::whereIn('product_id', $productIds)->avg('rating') ?? 0;
+
+        $payload[] = [
+            'merchant_id'  => $m->merchant_id,
+            'company_name' => $m->company_name,
+            'total_sales'  => (float) $totalSales,
+            'avg_rating'   => (float) $avgRating,
+        ];
+    }
+
+    // 2. Localizar el script Python
+    $scriptPath = base_path('python/ml_analyzer.py');
+    if (!file_exists($scriptPath)) {
+        return back()->with('error', 'Script ML no encontrado.');
+    }
+
+    // 3. Ejecutar el proceso Python con stdin JSON
+    $process = new Process(['python3', $scriptPath]);
+    $process->setInput(json_encode($payload));
+    $process->run();
+
+    // 4. Verificar éxito del proceso
+    if (!$process->isSuccessful()) {
+        return back()->with('error', 'Error en el motor ML: ' . $process->getErrorOutput());
+    }
+
+    // 5. Decodificar la salida JSON
+    $output = json_decode($process->getOutput(), true);
+    if (isset($output['status']) && $output['status'] === 'error') {
+        return back()->with('error', 'ML Error: ' . $output['message']);
+    }
+
+    // 6. Pasar resultados a la vista vía sesión flash
+    session()->flash('ml_results', $output['analytics'] ?? []);
+    return back()->with('success', 'Análisis ML completado.');
+}
+```
+
+### Ruta que dispara el análisis
+
+```php title="routes/web.php"
+Route::middleware(['auth', 'role:analyst'])
+    ->prefix('admin')
+    ->name('analyst.')
+    ->group(function () {
+        Route::post('/run-ml', [AnalystController::class, 'runMl'])
+            ->name('run-ml');
+    });
+```
+
+El analista activa el análisis haciendo `POST /admin/run-ml` desde el panel de administración (por ejemplo, a través de un botón en la vista del reporte de reseñas).
+
+### Diagrama de comunicación Laravel ↔ Python
+
+```
+Laravel (PHP)                      Python (ml_analyzer.py)
+─────────────────────────────────────────────────────────
+AnalystController::runMl()
+  │
+  ├─ Construye $payload (array PHP)
+  ├─ json_encode($payload) ──────────────► stdin del proceso
+  │                                         │
+  │                                    json.loads(stdin)
+  │                                    analyze(data)
+  │                                    json.dumps(output)
+  │                                         │
+  ├─ $process->getOutput() ◄───────────── stdout del proceso
+  └─ json_decode(output)
+       └─ session()->flash('ml_results', ...)
+```
+
+---
+
+## Ejecutar ml_analyzer.py manualmente
+
+Puedes probar el clasificador directamente desde la terminal sin pasar por Laravel:
+
+<CodeGroup>
+```bash title="Entrada inline"
+echo '[{"merchant_id":1,"company_name":"Demo Store","total_sales":120000,"avg_rating":4.5}]' \
+  | python3 python/ml_analyzer.py
+```
+
+```bash title="Desde un archivo JSON"
+cat merchants.json | python3 python/ml_analyzer.py
+```
+</CodeGroup>
+
+Salida esperada:
+
+```json title="stdout"
+{
+  "status": "success",
+  "analytics": [
+    {
+      "merchant_id": 1,
+      "company_name": "Demo Store",
+      "raw_score": 48027.0,
+      "classification": "Top Performer",
+      "anomaly_detected": false
+    }
+  ]
+}
+```
+
+---
+
+## Requisitos de entorno
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="python">
+    Se requiere **Python 3.8+**. Verifica con `python3 --version`. El binario
+    debe estar disponible en el `PATH` del usuario que ejecuta el servidor web
+    (normalmente `www-data` en producción).
+  </Card>
+  <Card title="mysql-connector-python" icon="database">
+    Solo necesario para `analytics.py`. Instala con
+    `pip install mysql-connector-python`. Si no está disponible, el script usa
+    datos de demostración automáticamente.
+  </Card>
+  <Card title="symfony/process" icon="gear">
+    Laravel incluye `symfony/process` como dependencia transitiva. No necesitas
+    instalarlo manualmente. Está disponible a través de `use Symfony\Component\Process\Process`.
+  </Card>
+  <Card title="Permisos de ejecución" icon="lock">
+    En servidores Linux, asegúrate de que `python/ml_analyzer.py` tiene
+    permisos de lectura para el usuario del servidor web:
+    `chmod 644 python/ml_analyzer.py`.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Si el servidor de producción no tiene Python3 instalado a nivel de sistema,
+  puedes usar un entorno virtual (`venv`) y ajustar la ruta del binario en
+  `new Process(['/ruta/a/venv/bin/python3', $scriptPath])`.
+</Tip>

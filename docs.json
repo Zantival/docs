@@ -1,0 +1,131 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "FusaShop",
+  "theme": "almond",
+  "logo": {
+    "light": "https://media.brand.dev/1eb27d4b-2f96-4109-91de-cf5ded854860.svg",
+    "dark": "https://media.brand.dev/1eb27d4b-2f96-4109-91de-cf5ded854860.svg"
+  },
+  "favicon": "/favicon.png",
+  "colors": {
+    "primary": "#0071ce",
+    "light": "#ffffff",
+    "dark": "#0d1e45"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Zantival/fusashop2"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Manual de Usuario",
+        "groups": [
+          {
+            "group": "Primeros Pasos",
+            "pages": [
+              "manual/bienvenida",
+              "manual/crear-cuenta",
+              "manual/iniciar-sesion",
+              "manual/verificar-correo"
+            ]
+          },
+          {
+            "group": "Para Clientes",
+            "pages": [
+              "manual/cliente/explorar-catalogo",
+              "manual/cliente/carrito",
+              "manual/cliente/checkout",
+              "manual/cliente/mis-pedidos",
+              "manual/cliente/reseñas"
+            ]
+          },
+          {
+            "group": "Para Comerciantes",
+            "pages": [
+              "manual/comerciante/registro-mipyme",
+              "manual/comerciante/panel",
+              "manual/comerciante/productos",
+              "manual/comerciante/inventario",
+              "manual/comerciante/pedidos",
+              "manual/comerciante/finanzas",
+              "manual/comerciante/banners"
+            ]
+          },
+          {
+            "group": "Para Administradores",
+            "pages": [
+              "manual/admin/panel-analista",
+              "manual/admin/gestion-usuarios",
+              "manual/admin/aprobacion-kyc",
+              "manual/admin/reportes",
+              "manual/admin/banners-globales"
+            ]
+          },
+          {
+            "group": "Comunicación y Soporte",
+            "pages": [
+              "manual/soporte/chat",
+              "manual/soporte/pqrs",
+              "manual/soporte/notificaciones",
+              "manual/soporte/mi-perfil"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Manual del Desarrollador",
+        "groups": [
+          {
+            "group": "Introducción",
+            "pages": [
+              "introduccion/descripcion-general",
+              "introduccion/arquitectura",
+              "introduccion/roles-y-permisos"
+            ]
+          },
+          {
+            "group": "Instalación y Configuración",
+            "pages": [
+              "instalacion/requisitos",
+              "instalacion/instalacion-local",
+              "instalacion/variables-de-entorno",
+              "instalacion/base-de-datos"
+            ]
+          },
+          {
+            "group": "Módulos Principales",
+            "pages": [
+              "modulos/autenticacion",
+              "modulos/consumidores",
+              "modulos/comerciantes",
+              "modulos/panel-analista",
+              "modulos/pagos",
+              "modulos/chat",
+              "modulos/pqrs"
+            ]
+          },
+          {
+            "group": "API REST",
+            "pages": [
+              "api/autenticacion-api",
+              "api/productos",
+              "api/carrito",
+              "api/ordenes"
+            ]
+          },
+          {
+            "group": "Integraciones y Análisis",
+            "pages": [
+              "integraciones/payu",
+              "integraciones/socialite",
+              "integraciones/modulo-python"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

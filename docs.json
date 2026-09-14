@@ -3,12 +3,12 @@
   "name": "FusaShop",
   "theme": "almond",
   "logo": {
-    "light": "https://media.brand.dev/1eb27d4b-2f96-4109-91de-cf5ded854860.svg",
-    "dark": "https://media.brand.dev/1eb27d4b-2f96-4109-91de-cf5ded854860.svg"
+    "light": "/images/logofusa.jpeg",
+    "dark": "/images/logofusa.jpeg"
   },
   "favicon": {
     "light": "/images/logofusa.jpeg",
-    "dark": "/favicon.png"
+    "dark": "/images/logofusa.jpeg"
   },
   "colors": {
     "primary": "#0071ce",

@@ -29,7 +29,7 @@ Cada pedido pasa por varios estados desde su creación hasta su entrega.
 
 <AccordionGroup>
   <Accordion title="Pendiente">
-    El pedido fue creado y el pago está siendo verificado por PayU. No requiere acción de tu parte.
+    El pedido fue creado y el pago está siendo verificado por Wompi. No requiere acción de tu parte.
   </Accordion>
 
   <Accordion title="En preparación">
@@ -37,7 +37,7 @@ Cada pedido pasa por varios estados desde su creación hasta su entrega.
   </Accordion>
 
   <Accordion title="Enviado">
-    El comerciante despachó el pedido. Si el envío incluye guía, la verás en el detalle.
+    El comerciante despachó el pedido y generó la guía de envío con **Envia.com**. En el detalle del pedido verás el número de guía, la transportadora asignada y un enlace de rastreo para seguir tu paquete en tiempo real hasta la entrega.
   </Accordion>
 
   <Accordion title="Entregado">
@@ -45,9 +45,29 @@ Cada pedido pasa por varios estados desde su creación hasta su entrega.
   </Accordion>
 
   <Accordion title="Cancelado">
-    El pedido fue cancelado, ya sea por ti, por el comerciante o por rechazo del pago. Si aplicaba reembolso, lo verás reflejado por PayU.
+    El pedido fue cancelado, ya sea por ti, por el comerciante o por rechazo del pago. Si aplicaba reembolso, lo verás reflejado por Wompi.
   </Accordion>
 </AccordionGroup>
+
+## Rastrear tu envío con Envia.com
+
+Cuando tu pedido pasa a **Enviado**, FusaShop genera una guía a través de **Envia.com**, el operador que consolida las principales transportadoras de Colombia (Servientrega, Coordinadora, TCC, Interrapidísimo, entre otras).
+
+<Steps>
+  <Step title="Abre el detalle del pedido">
+    En `/shop/orders`, haz clic en el pedido con estado **Enviado**.
+  </Step>
+  <Step title="Copia o abre el número de guía">
+    En la sección **Envío** verás la transportadora asignada y el número de guía generado por Envia.com.
+  </Step>
+  <Step title="Haz clic en Rastrear envío">
+    El botón **Rastrear envío** te lleva al rastreador de Envia.com, que muestra en tiempo real el estado del paquete: recolectado, en tránsito, en reparto y entregado.
+  </Step>
+</Steps>
+
+<Tip>
+  También recibirás notificaciones automáticas cuando la transportadora actualice el estado del envío (recolectado, en reparto y entregado).
+</Tip>
 
 <Tip>
   Si el estado de tu pedido no cambia por varios días, contacta al comerciante mediante el [chat](/manual/soporte/chat) o abre un ticket de [PQRS](/manual/soporte/pqrs).

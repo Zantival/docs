@@ -1,19 +1,19 @@
 ---
-title: "Módulo de pagos con PayU: flujo, webhooks y estados"
+title: "Módulo de pagos con Wompi: flujo, webhooks y estados"
 sidebarTitle: "Pagos"
-description: "Integración completa de PayU en FusaShop: checkout, redirección de respuesta, webhook server-to-server, estados de orden y máquina de estados de pago."
+description: "Integración completa de Wompi en FusaShop: checkout, redirección de respuesta, webhook de eventos firmado, estados de orden y máquina de estados de pago."
 ---
 
-FusaShop procesa los pagos a través de **PayU Latam**, la pasarela de pagos más utilizada en Colombia. El flujo combina una redirección al checkout de PayU (lado del cliente) con una confirmación server-to-server vía webhook para garantizar la integridad del pago aunque el usuario cierre el navegador antes de volver. Toda la lógica está implementada en `PaymentController` y en el servicio `PayUService`.
+FusaShop procesa los pagos a través de **Wompi** (Bancolombia), una de las pasarelas de pagos más utilizadas en Colombia. El flujo combina una redirección al Web Checkout de Wompi (lado del cliente) con una confirmación server-to-server vía webhook firmado con SHA-256 para garantizar la integridad del pago aunque el usuario cierre el navegador antes de volver. Toda la lógica está implementada en `PaymentController` y en el servicio `WompiService`.
 
 ## Visión general de la integración
 
 <CardGroup cols={2}>
-  <Card title="Checkout de PayU" icon="credit-card" href="/integraciones/payu">
-    El consumidor es redirigido al formulario de pago de PayU con parámetros firmados. PayU procesa la transacción y redirige de vuelta a `GET /payment/response`.
+  <Card title="Checkout de Wompi" icon="credit-card" href="/integraciones/wompi">
+    El consumidor es redirigido al Web Checkout de Wompi con parámetros firmados. Wompi procesa la transacción y redirige de vuelta a `GET /payment/response`.
   </Card>
-  <Card title="Webhook server-to-server" icon="webhook" href="/modulos/pagos">
-    PayU envía una confirmación `POST /payment/webhook` directamente al servidor, independientemente de la acción del usuario. Aquí se actualiza el estado final de la orden.
+  <Card title="Webhook de eventos" icon="webhook" href="/modulos/pagos">
+    Wompi envía una confirmación `POST /payment/webhook` directamente al servidor con firma `checksum`, independientemente de la acción del usuario. Aquí se actualiza el estado final de la orden.
   </Card>
 </CardGroup>
 
@@ -25,38 +25,37 @@ El proceso de pago comienza cuando el consumidor confirma su carrito en `POST /s
 
 <Steps>
   <Step title="El consumidor confirma el pedido">
-    El método `checkoutProcess` del `ConsumerController` valida la dirección de envío y el método de pago (`card`, `transfer` o `cash`). Se crea la orden con `status = 'pending'` y `payment_status = 'paid'` (el estado final se confirma vía webhook).
+    El método `checkoutProcess` del `ConsumerController` valida la dirección de envío y el método de pago (`card`, `transfer` o `cash`). Se crea la orden con `status = 'pending'` y `payment_status = 'pending'` (el estado final se confirma vía webhook).
   </Step>
-  <Step title="Generación de parámetros PayU">
-    `PayUService::getCheckoutParams($order)` construye el array de parámetros requeridos por PayU, incluyendo la referencia única `ORDER-{id}-{timestamp}` y la firma MD5.
+  <Step title="Generación de parámetros Wompi">
+    `WompiService::getCheckoutParams($order)` construye el array de parámetros requeridos por Wompi, incluyendo la referencia única `ORDER-{id}-{timestamp}`, el monto en centavos y la firma de integridad SHA-256.
   </Step>
-  <Step title="Redirección al formulario de PayU">
-    El navegador del consumidor es enviado al checkout de PayU (sandbox o producción según la variable `test`).
+  <Step title="Redirección al Web Checkout de Wompi">
+    El navegador del consumidor es enviado al checkout de Wompi (sandbox o producción según la variable `WOMPI_ENV`).
   </Step>
-  <Step title="PayU procesa el pago">
-    El consumidor ingresa sus datos de pago directamente en la plataforma de PayU, sin que FusaShop maneje información de tarjetas.
+  <Step title="Wompi procesa el pago">
+    El consumidor ingresa sus datos de pago directamente en la plataforma de Wompi (tarjeta, PSE, Nequi, Bancolombia), sin que FusaShop maneje información sensible.
   </Step>
   <Step title="Redirección de respuesta (frontend)">
-    PayU redirige al consumidor a `GET /payment/response` con el parámetro `transactionState` y `referenceCode`.
+    Wompi redirige al consumidor a `GET /payment/response` con el parámetro `id` de la transacción.
   </Step>
   <Step title="Confirmación webhook (backend)">
-    En paralelo, PayU envía `POST /payment/webhook` al servidor con el resultado definitivo. Este es el paso que actualiza la base de datos.
+    En paralelo, Wompi envía `POST /payment/webhook` al servidor con el evento firmado. Este es el paso que actualiza la base de datos.
   </Step>
 </Steps>
 
 ---
 
-## Firma de transacción
+## Firma de integridad
 
-`PayUService` genera la firma MD5 requerida por PayU para validar la integridad de la solicitud:
+`WompiService` genera la firma SHA-256 requerida por Wompi para validar la integridad de la solicitud:
 
-```php title="PayUService.php — generateSignature()"
-public function generateSignature($reference, $amount, $currency)
+```php title="WompiService.php — generateSignature()"
+public function generateSignature($reference, $amountInCents, $currency)
 {
-    // Formato: ApiKey~merchantId~referenceCode~amount~currency
-    $amountFormatted = number_format($amount, 0, '.', '');
-    $signatureString = "{$this->apiKey}~{$this->merchantId}~{$reference}~{$amountFormatted}~{$currency}";
-    return md5($signatureString);
+    // Formato: reference + amountInCents + currency + integritySecret
+    $concatenated = "{$reference}{$amountInCents}{$currency}{$this->integritySecret}";
+    return hash('sha256', $concatenated);
 }
 ```
 
@@ -64,7 +63,7 @@ La referencia de la orden sigue el formato `ORDER-{id}-{timestamp}`, por ejemplo
 
 ```php title="PaymentController.php — webhook() — extracción del ID"
 // Extraer ID de pedido de la referencia (ORDER-ID-TIME)
-$parts = explode('-', $reference);
+$parts = explode('-', (string) $reference);
 if (isset($parts[1])) {
     $orderId = $parts[1];
     $order = Order::find($orderId);
@@ -76,25 +75,29 @@ if (isset($parts[1])) {
 
 ## Endpoint de respuesta (frontend)
 
-**`GET /payment/response`** — PayU redirige al consumidor aquí al terminar la transacción.
+**`GET /payment/response`** — Wompi redirige al consumidor aquí al terminar la transacción con el parámetro `id` de la transacción.
 
 <CodeGroup>
 ```php title="PaymentController.php — response()"
 public function response(Request $request)
 {
-    // transactionState: 4 = Aprobado, 6 = Rechazado, 104 = Error, 7 = Pendiente
-    $state     = $request->get('transactionState');
-    $reference = $request->get('referenceCode');
+    $transactionId = $request->get('id');
 
     $status  = 'pending';
     $message = 'Tu pago está siendo procesado.';
+    $reference = null;
 
-    if ($state == 4) {
-        $status  = 'success';
-        $message = '¡Pago aprobado con éxito! Gracias por tu compra.';
-    } elseif ($state == 6) {
-        $status  = 'error';
-        $message = 'El pago fue rechazado. Intenta con otro medio.';
+    if ($transactionId) {
+        $tx = $this->wompi->getTransaction($transactionId);
+        $reference = $tx['reference'] ?? null;
+
+        if (($tx['status'] ?? null) === 'APPROVED') {
+            $status  = 'success';
+            $message = '¡Pago aprobado con éxito! Gracias por tu compra.';
+        } elseif (($tx['status'] ?? null) === 'DECLINED') {
+            $status  = 'error';
+            $message = 'El pago fue rechazado. Intenta con otro medio.';
+        }
     }
 
     return view('payment.result', compact('status', 'message', 'reference'));
@@ -106,38 +109,56 @@ public function response(Request $request)
   Este endpoint **solo muestra un mensaje al usuario**. No actualiza la base de datos. La actualización real se realiza en el webhook para garantizar consistencia incluso si el usuario cierra el navegador.
 </Info>
 
-### Códigos de `transactionState`
+### Estados de la transacción Wompi
 
-| Código | Significado | Estado mostrado |
-|--------|-------------|-----------------|
-| `4` | Aprobado | `success` |
-| `6` | Rechazado | `error` |
-| `7` | Pendiente | `pending` |
-| `104` | Error interno | — (no manejado en `response`, solo en webhook) |
+| Estado | Significado | Estado mostrado |
+| --- | --- | --- |
+| `APPROVED` | Aprobado | `success` |
+| `DECLINED` | Rechazado | `error` |
+| `VOIDED` | Anulado | `error` |
+| `PENDING` | Pendiente | `pending` |
+| `ERROR` | Error interno | `pending` |
 
 ---
 
 ## Endpoint de webhook (backend)
 
-**`POST /payment/webhook`** — PayU lo llama directamente desde sus servidores (server-to-server).
+**`POST /payment/webhook`** — Wompi lo llama directamente desde sus servidores (server-to-server) enviando el evento `transaction.updated` con una firma `checksum`.
 
 <CodeGroup>
 ```php title="PaymentController.php — webhook()"
 public function webhook(Request $request)
 {
-    Log::info('PayU Webhook received', $request->all());
+    Log::info('Wompi Webhook received', $request->all());
 
-    $reference = $request->post('reference_sale');
-    $state     = $request->post('state_pol'); // 4 = Aprobado
-    $value     = $request->post('value');
+    $payload    = $request->all();
+    $signature  = $payload['signature']['checksum'] ?? null;
+    $properties = $payload['signature']['properties'] ?? [];
+    $timestamp  = $payload['timestamp'] ?? null;
 
-    $parts = explode('-', $reference);
+    // Validar firma: sha256(concat(props) + timestamp + eventsSecret)
+    $concatenated = '';
+    foreach ($properties as $prop) {
+        $concatenated .= data_get($payload['data'], $prop);
+    }
+    $concatenated .= $timestamp . config('services.wompi.events_secret');
+    $expected = hash('sha256', $concatenated);
+
+    if (!hash_equals($expected, (string) $signature)) {
+        return response('Invalid signature', 401);
+    }
+
+    $tx        = $payload['data']['transaction'] ?? [];
+    $reference = $tx['reference'] ?? null;
+    $status    = $tx['status'] ?? null;
+
+    $parts = explode('-', (string) $reference);
     if (isset($parts[1])) {
         $orderId = $parts[1];
         $order   = Order::find($orderId);
 
         if ($order) {
-            if ($state == 4) {
+            if ($status === 'APPROVED') {
                 $order->update(['payment_status' => 'paid', 'status' => 'processing']);
 
                 // Enviar recibo al consumidor
@@ -147,7 +168,7 @@ public function webhook(Request $request)
                 } catch (\Exception $e) {
                     Log::error('Error sending receipt email: ' . $e->getMessage());
                 }
-            } elseif ($state == 6 || $state == 5) {
+            } elseif (in_array($status, ['DECLINED', 'VOIDED', 'ERROR'], true)) {
                 $order->update(['payment_status' => 'failed']);
             }
         }
@@ -159,16 +180,18 @@ public function webhook(Request $request)
 </CodeGroup>
 
 <Warning>
-  El webhook debe responder con HTTP `200 OK` para que PayU no reintente la notificación. Si el servidor retorna cualquier otro código, PayU repetirá la llamada hasta cinco veces.
+  El webhook debe responder con HTTP `200 OK` para que Wompi no reintente la notificación. Si la firma es inválida responde `401` y Wompi reintenta el envío varias veces siguiendo su política de reintentos.
 </Warning>
 
 ### Lógica de estados en el webhook
 
-| `state_pol` | Acción sobre la orden |
-|-------------|----------------------|
-| `4` (Aprobado) | `payment_status → paid`, `status → processing`, envía `OrderReceipt` por email |
-| `5` (Expirado) | `payment_status → failed` |
-| `6` (Rechazado) | `payment_status → failed` |
+| `status` de Wompi | Acción sobre la orden |
+| --- | --- |
+| `APPROVED` | `payment_status → paid`, `status → processing`, envía `OrderReceipt` por email |
+| `DECLINED` | `payment_status → failed` |
+| `VOIDED` | `payment_status → failed` |
+| `ERROR` | `payment_status → failed` |
+| `PENDING` | Se ignora, se espera el siguiente evento |
 
 ---
 
@@ -190,7 +213,7 @@ pending → processing → shipped → delivered
 |--------|-------------|
 | `pending` | La orden acaba de crearse, esperando confirmación de pago |
 | `processing` | Pago confirmado, el comerciante está preparando el envío |
-| `shipped` | El pedido fue entregado al servicio de mensajería |
+| `shipped` | El pedido fue entregado al servicio de mensajería (guía Envia.com generada) |
 | `delivered` | El consumidor recibió el pedido |
 | `cancelled` | La orden fue cancelada antes de entregarse |
 
@@ -206,46 +229,53 @@ pending → paid
 | Estado | Descripción |
 |--------|-------------|
 | `pending` | Pago iniciado, aún sin confirmar (estado inicial) |
-| `paid` | PayU confirmó el pago exitosamente (`state_pol = 4`) |
-| `failed` | Pago rechazado o expirado (`state_pol = 5` o `6`) |
+| `paid` | Wompi confirmó el pago exitosamente (`status = APPROVED`) |
+| `failed` | Pago rechazado, anulado o con error (`DECLINED`, `VOIDED`, `ERROR`) |
 
 <Note>
-  Los estados `status` y `payment_status` se gestionan por separado. Una orden puede tener `payment_status = paid` y `status = processing` simultáneamente. El comerciante es responsable de avanzar el `status` logístico desde su panel.
+  Los estados `status` y `payment_status` se gestionan por separado. Una orden puede tener `payment_status = paid` y `status = processing` simultáneamente. El comerciante es responsable de avanzar el `status` logístico desde su panel, generalmente a partir de la generación de la guía en [Envia.com](/integraciones/envia).
 </Note>
 
 ---
 
-## Configuración del servicio PayU
+## Configuración del servicio Wompi
 
-`PayUService` lee su configuración desde `config/services.php` (que a su vez toma valores de `.env`):
+`WompiService` lee su configuración desde `config/services.php` (que a su vez toma valores de `.env`):
 
 <CodeGroup>
-```php title="PayUService.php — __construct()"
-$this->merchantId = config('services.payu.merchant_id', '508029'); // Sandbox por defecto
-$this->apiKey     = config('services.payu.api_key', '4Vj8eK4r98P846E');
-$this->accountId  = config('services.payu.account_id', '512321');
-$this->test       = config('services.payu.test', 1);
-$this->url        = $this->test
-    ? 'https://sandbox.checkout.payulatam.com/checkout/webcheckout.php'
-    : 'https://checkout.payulatam.com/checkout/webcheckout.php';
+```php title="WompiService.php — __construct()"
+$this->publicKey       = config('services.wompi.public_key');
+$this->privateKey      = config('services.wompi.private_key');
+$this->integritySecret = config('services.wompi.integrity_secret');
+$this->eventsSecret    = config('services.wompi.events_secret');
+$this->env             = config('services.wompi.env', 'sandbox');
+
+$this->checkoutUrl = $this->env === 'production'
+    ? 'https://checkout.wompi.co/p/'
+    : 'https://checkout.co.uat.wompi.dev/p/';
+
+$this->apiUrl = $this->env === 'production'
+    ? 'https://production.wompi.co/v1'
+    : 'https://api-sandbox.co.uat.wompi.dev/v1';
 ```
 
-```env title=".env — variables de PayU"
-PAYU_MERCHANT_ID=tu_merchant_id
-PAYU_API_KEY=tu_api_key
-PAYU_ACCOUNT_ID=tu_account_id
-PAYU_TEST=0
+```env title=".env — variables de Wompi"
+WOMPI_PUBLIC_KEY=pub_test_xxxxxxxxxxxxxxxxxxxxxxxx
+WOMPI_PRIVATE_KEY=prv_test_xxxxxxxxxxxxxxxxxxxxxxx
+WOMPI_INTEGRITY_SECRET=test_integrity_xxxxxxxxxxxxxxxx
+WOMPI_EVENTS_SECRET=test_events_xxxxxxxxxxxxxxxxxxxx
+WOMPI_ENV=sandbox
 ```
 </CodeGroup>
 
 <Tip>
-  Para pruebas en desarrollo, deja `PAYU_TEST=1`. PayU sandbox tiene tarjetas de prueba disponibles en su documentación oficial. Cambia a `PAYU_TEST=0` solo en producción con credenciales reales.
+  Para pruebas en desarrollo, usa `WOMPI_ENV=sandbox` y las llaves `pub_test_`/`prv_test_`. Wompi ofrece tarjetas y cuentas de prueba disponibles en su documentación oficial. Cambia a `WOMPI_ENV=production` con las llaves `pub_prod_`/`prv_prod_` solo en producción.
 </Tip>
 
 ---
 
 ## Correo de recibo (`OrderReceipt`)
 
-Cuando el webhook confirma un pago exitoso, FusaShop envía automáticamente un correo al consumidor usando la clase mailable `App\Mail\OrderReceipt`. El correo incluye el detalle de los ítems y el total del pedido, cargados con `$order->load('items.product', 'user')`.
+Cuando el webhook confirma un pago exitoso (`APPROVED`), FusaShop envía automáticamente un correo al consumidor usando la clase mailable `App\Mail\OrderReceipt`. El correo incluye el detalle de los ítems y el total del pedido, cargados con `$order->load('items.product', 'user')`.
 
 Los errores en el envío del correo se registran en el log pero **no interrumpen** el proceso de actualización de la orden, garantizando la consistencia del estado en base de datos.

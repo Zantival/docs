@@ -1,0 +1,261 @@
+---
+title: "Integra Wompi como pasarela de pagos en FusaShop"
+sidebarTitle: "Wompi"
+description: "Configura Wompi en FusaShop: variables de entorno, Widget/Web Checkout, URL de redirección al comprador y webhook de eventos para confirmar pedidos."
+---
+
+FusaShop utiliza **Wompi** (Bancolombia) como pasarela de pago para procesar los pedidos de los consumidores. La integración se basa en el modelo de redirección Web Checkout: el cliente completa el pago en el sitio seguro de Wompi y luego regresa a FusaShop a través de una URL de redirección (`redirect-url`) que muestra el resultado visual al comprador, mientras que Wompi confirma la transacción de forma independiente enviando un evento firmado al webhook del servidor (`events-url`). La clase `WompiService` construye todos los parámetros del checkout, incluida la firma de integridad SHA-256, mientras que `PaymentController` maneja las respuestas.
+
+## Variables de entorno requeridas
+
+Agrega las siguientes claves a tu archivo `.env` antes de poner la integración en producción. Los valores `pub_test_` y `prv_test_` que trae el código por defecto solo son válidos para el entorno de pruebas (sandbox) de Wompi.
+
+```ini title=".env"
+WOMPI_PUBLIC_KEY=pub_test_xxxxxxxxxxxxxxxxxxxxxxxx
+WOMPI_PRIVATE_KEY=prv_test_xxxxxxxxxxxxxxxxxxxxxxx
+WOMPI_INTEGRITY_SECRET=test_integrity_xxxxxxxxxxxxxxxx
+WOMPI_EVENTS_SECRET=test_events_xxxxxxxxxxxxxxxxxxxx
+WOMPI_ENV=sandbox        # sandbox | production
+```
+
+Luego registra el bloque `wompi` en `config/services.php`:
+
+```php title="config/services.php"
+'wompi' => [
+    'public_key'       => env('WOMPI_PUBLIC_KEY'),
+    'private_key'      => env('WOMPI_PRIVATE_KEY'),
+    'integrity_secret' => env('WOMPI_INTEGRITY_SECRET'),
+    'events_secret'    => env('WOMPI_EVENTS_SECRET'),
+    'env'              => env('WOMPI_ENV', 'sandbox'),
+],
+```
+
+<Warning>
+  Nunca confirmes los valores de producción de `WOMPI_PRIVATE_KEY`, `WOMPI_INTEGRITY_SECRET` ni `WOMPI_EVENTS_SECRET` en el repositorio. Añade `.env` a tu `.gitignore` y usa variables de entorno del servidor en producción.
+</Warning>
+
+## Rutas registradas
+
+Las dos rutas de retorno son nombradas por `WompiService` al construir los parámetros del checkout. Asegúrate de registrarlas en `routes/web.php`:
+
+```php title="routes/web.php"
+use App\Http\Controllers\PaymentController;
+
+Route::get('/payment/response', [PaymentController::class, 'response'])
+    ->name('payment.response');
+
+Route::post('/payment/webhook', [PaymentController::class, 'webhook'])
+    ->name('payment.webhook');
+```
+
+<Note>
+  La ruta del webhook (`payment.webhook`) debe estar **excluida** de la protección CSRF porque Wompi envía un `POST` externo sin token de sesión. Agrégala al array `$except` de `App\Http\Middleware\VerifyCsrfToken`.
+</Note>
+
+## Flujo completo de pago
+
+El siguiente diagrama describe los pasos que ocurren desde que el comprador confirma su pedido hasta que FusaShop lo marca como pagado y le envía el recibo por correo.
+
+<Steps>
+  <Step title="El consumidor confirma el checkout">
+    El consumidor revisa su carrito y hace clic en **Pagar**. El controlador `ConsumerController::checkoutProcess()` crea el registro `Order` en la base de datos con `payment_status = 'pending'`.
+  </Step>
+  <Step title="WompiService genera los parámetros del checkout">
+    `WompiService::getCheckoutParams($order)` construye el array con todos los campos que necesita el Web Checkout de Wompi, incluyendo la firma de integridad SHA-256 y la referencia con formato `ORDER-{id}-{timestamp}`.
+
+    ```php title="app/Services/WompiService.php"
+    public function getCheckoutParams($order)
+    {
+        // Wompi requiere el monto en centavos (COP)
+        $amountInCents = (int) round($order->total * 100);
+        $reference     = "ORDER-{$order->id}-" . time();
+        $currency      = 'COP';
+
+        return [
+            'public-key'    => $this->publicKey,
+            'currency'      => $currency,
+            'amount-in-cents' => $amountInCents,
+            'reference'     => $reference,
+            'signature:integrity' => $this->generateSignature(
+                $reference, $amountInCents, $currency
+            ),
+            'redirect-url'  => route('payment.response'),
+            'customer-data:email'      => $order->user->email,
+            'customer-data:full-name'  => $order->user->name,
+            'checkout-url' => $this->checkoutUrl,
+        ];
+    }
+    ```
+
+    La firma de integridad se calcula así:
+
+    ```php title="app/Services/WompiService.php"
+    public function generateSignature($reference, $amountInCents, $currency)
+    {
+        // Formato: reference + amountInCents + currency + integritySecret
+        $concatenated = "{$reference}{$amountInCents}{$currency}{$this->integritySecret}";
+        return hash('sha256', $concatenated);
+    }
+    ```
+  </Step>
+  <Step title="Redirección al Web Checkout de Wompi">
+    La vista del checkout construye un formulario HTML (o usa el Widget JS oficial de Wompi) con los parámetros anteriores y redirige automáticamente al usuario al portal de pago de Wompi (sandbox o producción, según `WOMPI_ENV`).
+  </Step>
+  <Step title="El comprador paga en Wompi">
+    El usuario completa el pago con tarjeta, PSE, Nequi, Bancolombia u otro medio disponible en la interfaz segura de Wompi. Wompi valida la transacción.
+  </Step>
+  <Step title="Redirección de respuesta al frontend (PaymentController::response)">
+    Wompi redirige al navegador del comprador a `redirect-url` con el parámetro `id` de la transacción. `PaymentController::response()` consulta el estado en la API de Wompi y muestra la vista `payment.result`:
+
+    ```php title="app/Http/Controllers/PaymentController.php"
+    public function response(Request $request)
+    {
+        $transactionId = $request->get('id');
+
+        $status  = 'pending';
+        $message = 'Tu pago está siendo procesado.';
+        $reference = null;
+
+        if ($transactionId) {
+            $tx = $this->wompi->getTransaction($transactionId);
+            $reference = $tx['reference'] ?? null;
+
+            if (($tx['status'] ?? null) === 'APPROVED') {
+                $status  = 'success';
+                $message = '¡Pago aprobado con éxito! Gracias por tu compra.';
+            } elseif (($tx['status'] ?? null) === 'DECLINED') {
+                $status  = 'error';
+                $message = 'El pago fue rechazado. Intenta con otro medio.';
+            }
+        }
+
+        return view('payment.result', compact('status', 'message', 'reference'));
+    }
+    ```
+
+    | `status` de Wompi | Significado | `$status` devuelto |
+    | --- | --- | --- |
+    | `APPROVED` | Aprobado | `success` |
+    | `DECLINED` | Rechazado | `error` |
+    | `VOIDED` | Anulado | `error` |
+    | `PENDING` | Pendiente | `pending` |
+    | `ERROR` | Error | `pending` |
+
+    <Info>
+      Este endpoint es **solo visual**: muestra un mensaje al comprador pero **no** actualiza la base de datos. La actualización real ocurre en el webhook de eventos.
+    </Info>
+  </Step>
+  <Step title="Confirmación webhook servidor-a-servidor (PaymentController::webhook)">
+    Wompi envía un `POST` a `events-url` de forma independiente al navegador del comprador. Este es el canal confiable para actualizar el estado del pedido. Antes de procesar el evento, `PaymentController::webhook()` valida la firma `checksum` que Wompi envía usando el `WOMPI_EVENTS_SECRET`:
+
+    ```php title="app/Http/Controllers/PaymentController.php"
+    public function webhook(Request $request)
+    {
+        Log::info('Wompi Webhook received', $request->all());
+
+        $payload   = $request->all();
+        $signature = $payload['signature']['checksum'] ?? null;
+        $properties = $payload['signature']['properties'] ?? [];
+        $timestamp = $payload['timestamp'] ?? null;
+
+        // Validar firma: sha256(concat(props) + timestamp + eventsSecret)
+        $concatenated = '';
+        foreach ($properties as $prop) {
+            $concatenated .= data_get($payload['data'], $prop);
+        }
+        $concatenated .= $timestamp . config('services.wompi.events_secret');
+        $expected = hash('sha256', $concatenated);
+
+        if (!hash_equals($expected, (string) $signature)) {
+            Log::warning('Wompi webhook signature mismatch');
+            return response('Invalid signature', 401);
+        }
+
+        $tx        = $payload['data']['transaction'] ?? [];
+        $reference = $tx['reference'] ?? null;
+        $status    = $tx['status'] ?? null;
+
+        // Extraer el ID del pedido de la referencia
+        $parts = explode('-', (string) $reference);
+        if (isset($parts[1])) {
+            $orderId = $parts[1];
+            $order   = Order::find($orderId);
+
+            if ($order) {
+                if ($status === 'APPROVED') {
+                    $order->update([
+                        'payment_status' => 'paid',
+                        'status'         => 'processing',
+                    ]);
+
+                    // Enviar recibo por correo electrónico
+                    try {
+                        Mail::to($order->user->email)
+                            ->send(new OrderReceipt($order->load('items.product', 'user')));
+                    } catch (\Exception $e) {
+                        Log::error('Error sending receipt email: ' . $e->getMessage());
+                    }
+                } elseif (in_array($status, ['DECLINED', 'VOIDED', 'ERROR'], true)) {
+                    $order->update(['payment_status' => 'failed']);
+                }
+            }
+        }
+
+        return response('OK', 200);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Lógica del webhook en detalle
+
+<CardGroup cols={2}>
+  <Card title="Formato de referencia" icon="tag">
+    La referencia del pedido sigue el formato `ORDER-{id}-{timestamp}`, por ejemplo `ORDER-42-1716300000`. El webhook extrae el `id` haciendo `explode('-', $reference)[1]`.
+  </Card>
+
+  <Card title="Estados de transacción" icon="circle-check">
+    `status = APPROVED` → aprobado: actualiza a `paid` + `processing` y envía correo. `DECLINED`, `VOIDED` o `ERROR` → `failed`. `PENDING` se ignora silenciosamente hasta el siguiente evento.
+  </Card>
+
+  <Card title="Correo OrderReceipt" icon="envelope">
+    Solo se envía cuando `status == APPROVED`. Se carga la relación `items.product` y `user` para incluir el detalle completo del pedido en el mailable `App\Mail\OrderReceipt`.
+  </Card>
+
+  <Card title="Logging" icon="file-lines">
+    Cada petición webhook se registra con `Log::info('Wompi Webhook received', $request->all())`. Los errores de envío de correo se registran con `Log::error(...)` sin interrumpir la respuesta `OK` a Wompi.
+  </Card>
+</CardGroup>
+
+## Firma de integridad
+
+Wompi valida la petición de checkout usando una firma SHA-256 construida con el formato:
+
+```text
+sha256(reference + amountInCents + currency + integritySecret)
+```
+
+<Warning>
+  El campo `amountInCents` debe ser el monto **en centavos**, como entero sin decimales. `WompiService::getCheckoutParams()` usa `(int) round($order->total * 100)` para garantizarlo. Un COP 1.000 debe enviarse como `100000`. Si cambias la moneda, revisa la documentación oficial de Wompi para el formato correcto.
+</Warning>
+
+## URL de Wompi según entorno
+
+| Entorno | Web Checkout | API REST |
+| --- | --- | --- |
+| Sandbox | `https://checkout.co.uat.wompi.dev/p/` | `https://api-sandbox.co.uat.wompi.dev/v1` |
+| Producción | `https://checkout.wompi.co/p/` | `https://production.wompi.co/v1` |
+
+El servicio selecciona la URL automáticamente según el valor de `WOMPI_ENV` en `.env`.
+
+## Consideraciones para producción
+
+<Accordion title="Lista de verificación antes de ir a producción">
+  - Cambia `WOMPI_ENV=production` en el servidor de producción.
+  - Sustituye las llaves `pub_test_` y `prv_test_` por las llaves de producción de tu cuenta Wompi (`pub_prod_` y `prv_prod_`).
+  - Registra la URL pública del `events-url` (webhook) en el panel de comercio de Wompi y guarda el `events secret` en `WOMPI_EVENTS_SECRET`.
+  - Verifica que `payment.webhook` esté excluido de CSRF en `VerifyCsrfToken`.
+  - Asegúrate de que `events-url` sea accesible públicamente (no `localhost`).
+  - Configura el mailer de producción (SMTP, Resend, Mailgun, etc.) para que `OrderReceipt` llegue correctamente.
+  - Revisa los logs en `storage/logs/laravel.log` para confirmar que los webhooks se están recibiendo y que la firma se valida correctamente.
+</Accordion>

@@ -8,7 +8,7 @@ FusaShop es una plataforma de comercio electrónico orientada a MiPymes colombia
 
 ## ¿Qué es FusaShop?
 
-FusaShop centraliza el ciclo de vida completo de una transacción: un consumidor explora el catálogo, agrega artículos al carrito, paga a través de PayU y luego puede dejar una reseña o abrir un PQRS. El comerciante —una MiPyme que supera el proceso KYC— administra sus productos, revisa pedidos y solicita banners publicitarios. El analista supervisa el sistema completo: aprueba KYC, gestiona usuarios, revisa reportes de ventas y ejecuta análisis de ML sobre el comportamiento de los comerciantes.
+FusaShop centraliza el ciclo de vida completo de una transacción: un consumidor explora el catálogo, agrega artículos al carrito, paga a través de Wompi, recibe su pedido con la guía de Envia.com para rastrear el envío y luego puede dejar una reseña o abrir un PQRS. El comerciante —una MiPyme que supera el proceso KYC— administra sus productos, revisa pedidos, genera las guías de envío y solicita banners publicitarios. El analista supervisa el sistema completo: aprueba KYC, gestiona usuarios, revisa reportes de ventas y ejecuta análisis de ML sobre el comportamiento de los comerciantes.
 
 ## Módulos principales
 
@@ -22,8 +22,11 @@ FusaShop centraliza el ciclo de vida completo de una transacción: un consumidor
   <Card title="Carrito y Checkout" icon="cart-shopping" href="/api/carrito">
     Carrito persistente en base de datos por consumidor. Proceso de compra con validación de cupones y cálculo de totales en tiempo real.
   </Card>
-  <Card title="Pagos con PayU" icon="credit-card" href="/integraciones/payu">
-    Integración con la pasarela de pagos PayU para procesar transacciones seguras. El estado de cada orden se actualiza de forma automática.
+  <Card title="Pagos con Wompi" icon="credit-card" href="/integraciones/wompi">
+    Integración con la pasarela de pagos Wompi (Bancolombia) para procesar transacciones seguras. El estado de cada orden se actualiza de forma automática mediante webhook firmado.
+  </Card>
+  <Card title="Envíos con Envia.com" icon="truck" href="/integraciones/envia">
+    Generación de guías y rastreo unificado a través de Envia.com, con soporte para Servientrega, Coordinadora, TCC e Interrapidísimo.
   </Card>
   <Card title="Chat en tiempo real" icon="comments" href="/modulos/chat">
     Mensajería directa entre consumidores y comerciantes mediante polling. Los mensajes se almacenan en el modelo `Message`.

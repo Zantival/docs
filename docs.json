@@ -106,6 +106,7 @@
               "modulos/comerciantes",
               "modulos/panel-analista",
               "modulos/pagos",
+              "modulos/envios",
               "modulos/chat",
               "modulos/pqrs"
             ]
@@ -122,7 +123,8 @@
           {
             "group": "Integraciones y Análisis",
             "pages": [
-              "integraciones/payu",
+              "integraciones/wompi",
+              "integraciones/envia",
               "integraciones/socialite",
               "integraciones/modulo-python"
             ]
@@ -130,5 +132,12 @@
         ]
       }
     ]
-  }
+  },
+  "redirects": [
+    {
+      "source": "/integraciones/payu",
+      "destination": "/integraciones/wompi",
+      "permanent": true
+    }
+  ]
 }

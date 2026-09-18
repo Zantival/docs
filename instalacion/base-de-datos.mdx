@@ -186,6 +186,9 @@ FusaShop tiene 28 archivos de migración que definen las siguientes tablas princ
   | `payment_status` | enum | `pending`, `paid`, `failed` |
   | `payment_method` | string | Método de pago (card, etc.) |
   | `shipping_address` | text | Dirección de entrega |
+  | `shipping_carrier` | string (nullable) | Transportadora asignada por Envia.com |
+  | `shipping_tracking_number` | string (nullable) | Número de guía generado por Envia.com |
+  | `shipping_tracking_url` | string (nullable) | URL de rastreo del envío |
   | `notes` | text (nullable) | Notas adicionales del pedido |
   | `discount` | decimal(12,2) | Descuento aplicado (cupón) |
   | `points_used` | integer | Puntos de fidelidad canjeados en el pedido |

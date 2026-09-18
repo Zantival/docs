@@ -1,0 +1,177 @@
+---
+title: "Módulo de envíos con Envia.com: cotización, guía y rastreo"
+sidebarTitle: "Envíos"
+description: "Integración de Envia.com en FusaShop: cotización de tarifas, generación de guías multi-transportadora, webhook de rastreo y actualización automática de estados."
+---
+
+FusaShop gestiona la logística de sus pedidos a través de **Envia.com**, un agregador que consolida en un solo API a las principales transportadoras colombianas (Servientrega, Coordinadora, TCC, Interrapidísimo, entre otras). El comerciante cotiza en tiempo real, elige la mejor opción por precio o tiempo y genera la guía sin salir de FusaShop. Toda la lógica está implementada en `ShippingController` y en el servicio `EnviaService`.
+
+## Visión general de la integración
+
+<CardGroup cols={2}>
+  <Card title="Cotización y guía" icon="truck" href="/integraciones/envia">
+    `EnviaService::quote()` y `EnviaService::createLabel()` interactúan con la API de Envia.com para obtener tarifas y emitir el rótulo en PDF.
+  </Card>
+
+  <Card title="Webhook de rastreo" icon="webhook" href="/modulos/envios">
+    Envia.com envía un `POST /shipping/webhook` cada vez que la transportadora actualiza el estado del paquete. La firma HMAC-SHA256 se valida con `ENVIA_WEBHOOK_SECRET`.
+  </Card>
+</CardGroup>
+
+---
+
+## Flujo de envío
+
+<Steps>
+  <Step title="Pago aprobado">
+    El webhook de Wompi confirma el pago y la orden pasa a `status = 'processing'`.
+  </Step>
+  <Step title="Cotización">
+    El comerciante abre el pedido y solicita cotización. `ShippingController::rate($order)` llama a Envia.com y devuelve la lista de opciones (transportadora, servicio, tiempo estimado y costo).
+  </Step>
+  <Step title="Selección y generación">
+    El comerciante elige una opción. `ShippingController::generate()` invoca `EnviaService::createLabel()` para emitir la guía. Envia.com devuelve el `trackingNumber` y la `label` (PDF).
+  </Step>
+  <Step title="Persistencia">
+    La orden se actualiza con `shipping_carrier`, `shipping_tracking_number`, `shipping_tracking_url` y `status = 'shipped'`. Se envía `OrderShipped` al consumidor.
+  </Step>
+  <Step title="Rastreo automático">
+    Envia.com publica eventos al webhook a medida que la transportadora reporta el paquete. Al recibir `delivered`, la orden pasa a `status = 'delivered'` y se envía `OrderDelivered`.
+  </Step>
+</Steps>
+
+---
+
+## Endpoints internos
+
+| Método | URI | Nombre | Descripción |
+| --- | --- | --- | --- |
+| `POST` | `/merchant/orders/{order}/shipping/rate` | `shipping.rate` | Cotizar transportadoras disponibles |
+| `POST` | `/merchant/orders/{order}/shipping/generate` | `shipping.generate` | Emitir la guía con la opción elegida |
+| `POST` | `/shipping/webhook` | `shipping.webhook` | Recibir eventos de rastreo de Envia.com |
+
+Las rutas del comerciante están protegidas por `auth`, `verified` y `role:merchant`. La ruta del webhook es pública y valida la autenticidad del origen con HMAC.
+
+---
+
+## Endpoint de webhook (backend)
+
+**`POST /shipping/webhook`** — Envia.com envía un evento por cada cambio de estado del paquete.
+
+<CodeGroup>
+
+```php title="ShippingController.php — webhook()"
+public function webhook(Request $request)
+{
+    Log::info('Envia Webhook received', $request->all());
+
+    $signature = $request->header('X-Envia-Signature');
+    $expected  = hash_hmac(
+        'sha256',
+        $request->getContent(),
+        config('services.envia.webhook_secret')
+    );
+
+    if (!hash_equals($expected, (string) $signature)) {
+        return response('Invalid signature', 401);
+    }
+
+    $tracking = $request->input('trackingNumber');
+    $status   = $request->input('status');
+
+    $order = Order::where('shipping_tracking_number', $tracking)->first();
+
+    if ($order) {
+        if ($status === 'delivered') {
+            $order->update(['status' => 'delivered']);
+            $order->user->notify(new OrderDelivered($order));
+        }
+        // Otros estados se registran para notificaciones intermedias
+        // sin cambiar `orders.status`
+    }
+
+    return response('OK', 200);
+}
+```
+
+</CodeGroup>
+
+<Warning>
+  El webhook debe responder con HTTP `200 OK` para que Envia.com no reintente la notificación. Si la firma no coincide responde `401` y el evento se descarta.
+</Warning>
+
+### Estados relevantes de Envia.com
+
+| Estado del evento | Acción sobre la orden |
+| --- | --- |
+| `label_generated` | Guía emitida, se registra al momento de crear |
+| `picked_up`, `in_transit`, `out_for_delivery` | Se notifica al cliente sin cambiar `orders.status` |
+| `delivered` | `status → delivered`, se envía `OrderDelivered` |
+| `returned`, `cancelled` | `status → cancelled` |
+
+---
+
+## Máquina de estados logísticos
+
+El campo `orders.status` avanza en función de los eventos de Envia.com:
+
+```text
+processing → shipped → delivered
+                             ↑
+      cancelled ←────────────┘ (returned/cancelled desde Envia.com)
+```
+
+<Note>
+  El módulo de pagos se encarga de la transición inicial `pending → processing` cuando Wompi confirma el pago. El módulo de envíos toma el testigo desde `processing` en adelante.
+</Note>
+
+---
+
+## Configuración del servicio Envia
+
+`EnviaService` lee su configuración desde `config/services.php` (que a su vez toma valores de `.env`):
+
+<CodeGroup>
+
+```php title="EnviaService.php — __construct()"
+$this->apiKey        = config('services.envia.api_key');
+$this->env           = config('services.envia.env', 'test');
+$this->origin        = config('services.envia.origin');
+$this->webhookSecret = config('services.envia.webhook_secret');
+
+$this->baseUrl = $this->env === 'production'
+    ? 'https://api.envia.com'
+    : 'https://api-test.envia.com';
+```
+
+```env title=".env — variables de Envia.com"
+ENVIA_API_KEY=tu_api_key_de_envia
+ENVIA_ENV=test
+ENVIA_WEBHOOK_SECRET=un_secreto_para_verificar_webhooks
+ENVIA_ORIGIN_NAME="FusaShop"
+ENVIA_ORIGIN_CITY=Fusagasugá
+ENVIA_ORIGIN_STATE=Cundinamarca
+ENVIA_ORIGIN_COUNTRY=CO
+ENVIA_ORIGIN_POSTAL_CODE=252211
+```
+
+</CodeGroup>
+
+<Tip>
+  Consulta la [guía de integración de Envia.com](/integraciones/envia) para el detalle completo de la configuración, el flujo de cotización y la generación de guías.
+</Tip>
+
+---
+
+## Notificaciones al consumidor
+
+Cada transición dispara una notificación al consumidor mediante Laravel Notifications:
+
+| Notificación | Cuándo se envía |
+| --- | --- |
+| `OrderShipped` | Al generar la guía con Envia.com |
+| `OrderInTransit` | Al recibir el evento `in_transit` |
+| `OrderOutForDelivery` | Al recibir el evento `out_for_delivery` |
+| `OrderDelivered` | Al recibir el evento `delivered` |
+
+Las notificaciones incluyen la transportadora, el número de guía y el enlace de rastreo unificado (`shipping_tracking_url`).

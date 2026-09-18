@@ -1,0 +1,237 @@
+---
+title: "Integra Envia.com para cotizar, generar y rastrear envíos"
+sidebarTitle: "Envia.com"
+description: "Configura Envia.com en FusaShop: variables de entorno, cotización de tarifas, generación de guías, webhook de estados y rastreo unificado para varias transportadoras."
+---
+
+FusaShop usa **Envia.com** como agregador logístico para cotizar tarifas, generar guías y rastrear los envíos de los pedidos. Envia.com unifica en un solo API a las principales transportadoras colombianas (Servientrega, Coordinadora, TCC, Interrapidísimo, entre otras), de modo que el comerciante elige la mejor opción por precio y tiempo sin salir de FusaShop. La clase `EnviaService` se encarga de las llamadas HTTP a la API de Envia.com y `ShippingController` maneja las respuestas y los eventos del webhook de estados.
+
+## Variables de entorno requeridas
+
+Agrega las siguientes claves a tu archivo `.env` antes de habilitar la integración. Envia.com entrega el token desde el panel del comercio en modo prueba y en modo producción.
+
+```ini title=".env"
+ENVIA_API_KEY=tu_api_key_de_envia
+ENVIA_ENV=test              # test | production
+ENVIA_WEBHOOK_SECRET=un_secreto_para_verificar_webhooks
+ENVIA_ORIGIN_NAME="FusaShop"
+ENVIA_ORIGIN_COMPANY="FusaShop"
+ENVIA_ORIGIN_EMAIL=logistica@fusashop.com
+ENVIA_ORIGIN_PHONE=+573001112233
+ENVIA_ORIGIN_STREET="Calle 45 # 12-30"
+ENVIA_ORIGIN_CITY=Fusagasugá
+ENVIA_ORIGIN_STATE=Cundinamarca
+ENVIA_ORIGIN_COUNTRY=CO
+ENVIA_ORIGIN_POSTAL_CODE=252211
+```
+
+Luego registra el bloque `envia` en `config/services.php`:
+
+```php title="config/services.php"
+'envia' => [
+    'api_key'        => env('ENVIA_API_KEY'),
+    'env'            => env('ENVIA_ENV', 'test'),
+    'webhook_secret' => env('ENVIA_WEBHOOK_SECRET'),
+    'origin' => [
+        'name'        => env('ENVIA_ORIGIN_NAME'),
+        'company'     => env('ENVIA_ORIGIN_COMPANY'),
+        'email'       => env('ENVIA_ORIGIN_EMAIL'),
+        'phone'       => env('ENVIA_ORIGIN_PHONE'),
+        'street'      => env('ENVIA_ORIGIN_STREET'),
+        'city'        => env('ENVIA_ORIGIN_CITY'),
+        'state'       => env('ENVIA_ORIGIN_STATE'),
+        'country'     => env('ENVIA_ORIGIN_COUNTRY', 'CO'),
+        'postal_code' => env('ENVIA_ORIGIN_POSTAL_CODE'),
+    ],
+],
+```
+
+<Warning>
+  Nunca subas la `ENVIA_API_KEY` de producción al repositorio. Añade `.env` a tu `.gitignore` y usa variables de entorno del servidor en producción.
+</Warning>
+
+## Endpoints de Envia.com
+
+`EnviaService` selecciona la URL base según el entorno configurado en `.env`.
+
+| Entorno | URL base |
+| --- | --- |
+| Test | `https://api-test.envia.com` |
+| Producción | `https://api.envia.com` |
+
+Los recursos que consume FusaShop son:
+
+| Recurso | Método | Ruta | Uso |
+| --- | --- | --- | --- |
+| Cotizar | `POST` | `/ship/rate/` | Obtener tarifas de todas las transportadoras |
+| Generar guía | `POST` | `/ship/generate/` | Emitir la guía con la transportadora elegida |
+| Rastreo | `GET` | `/ship/tracking/{carrier}/{tracking_number}` | Consultar el estado actual del envío |
+
+## Rutas registradas
+
+FusaShop expone dos endpoints internos para cotizar y generar la guía desde el panel del comerciante, más un webhook público para recibir los cambios de estado que Envia.com publica.
+
+```php title="routes/web.php"
+use App\Http\Controllers\ShippingController;
+
+Route::middleware(['auth', 'role:merchant'])->group(function () {
+    Route::post('/merchant/orders/{order}/shipping/rate',
+        [ShippingController::class, 'rate'])->name('shipping.rate');
+
+    Route::post('/merchant/orders/{order}/shipping/generate',
+        [ShippingController::class, 'generate'])->name('shipping.generate');
+});
+
+Route::post('/shipping/webhook',
+    [ShippingController::class, 'webhook'])->name('shipping.webhook');
+```
+
+<Note>
+  La ruta del webhook (`shipping.webhook`) debe estar **excluida** de la protección CSRF porque Envia.com envía un `POST` externo sin token de sesión. Agrégala al array `$except` de `App\Http\Middleware\VerifyCsrfToken`.
+</Note>
+
+## Flujo completo de envío
+
+<Steps>
+  <Step title="El pago se aprueba">
+    Cuando Wompi confirma el pago (webhook `APPROVED`), la orden pasa a `status = 'processing'`. En este punto la orden está lista para generar la guía.
+  </Step>
+  <Step title="El comerciante cotiza tarifas">
+    Desde el panel del comerciante, `ShippingController::rate($order)` llama a `EnviaService::quote($order)` para consultar las tarifas disponibles.
+
+    ```php title="app/Services/EnviaService.php"
+    public function quote($order)
+    {
+        return Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/ship/rate/", [
+                'origin'      => $this->origin,
+                'destination' => $this->destinationFromOrder($order),
+                'packages'    => $this->packagesFromOrder($order),
+                'shipment'    => ['type' => 1, 'carrier' => null], // 1 = paquete
+            ])->throw()->json('data', []);
+    }
+    ```
+
+    La respuesta contiene un arreglo de opciones con la transportadora, el tiempo estimado y el costo en COP.
+  </Step>
+  <Step title="El comerciante elige transportadora">
+    En el panel se muestran las opciones (Servientrega, Coordinadora, TCC, Interrapidísimo, entre otras) y el comerciante elige la que mejor se ajuste.
+  </Step>
+  <Step title="Generar la guía">
+    `ShippingController::generate()` llama a `EnviaService::createLabel($order, $carrier, $service)`. Envia.com devuelve el número de guía y una URL con el rótulo en PDF.
+
+    ```php title="app/Services/EnviaService.php"
+    public function createLabel($order, string $carrier, string $service)
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/ship/generate/", [
+                'origin'      => $this->origin,
+                'destination' => $this->destinationFromOrder($order),
+                'packages'    => $this->packagesFromOrder($order),
+                'shipment'    => [
+                    'carrier' => $carrier,
+                    'service' => $service,
+                    'type'    => 1,
+                ],
+                'settings' => ['currency' => 'COP', 'labelFormat' => 'PDF'],
+            ])->throw()->json();
+
+        return [
+            'tracking_number' => data_get($response, 'data.0.trackingNumber'),
+            'label_url'       => data_get($response, 'data.0.label'),
+            'carrier'         => $carrier,
+        ];
+    }
+    ```
+  </Step>
+  <Step title="Actualizar la orden">
+    `ShippingController::generate()` guarda la información logística en la orden:
+
+    ```php title="app/Http/Controllers/ShippingController.php"
+    $order->update([
+        'status'                   => 'shipped',
+        'shipping_carrier'         => $result['carrier'],
+        'shipping_tracking_number' => $result['tracking_number'],
+        'shipping_tracking_url'    => $this->envia->trackingUrl(
+            $result['carrier'],
+            $result['tracking_number']
+        ),
+    ]);
+
+    $order->user->notify(new OrderShipped($order));
+    ```
+  </Step>
+  <Step title="Recepción de eventos de rastreo (webhook)">
+    Envia.com envía un `POST` a `shipping.webhook` cada vez que la transportadora actualiza el estado del paquete. Antes de procesar el evento, se valida el header `X-Envia-Signature` con `ENVIA_WEBHOOK_SECRET`:
+
+    ```php title="app/Http/Controllers/ShippingController.php"
+    public function webhook(Request $request)
+    {
+        Log::info('Envia Webhook received', $request->all());
+
+        $signature = $request->header('X-Envia-Signature');
+        $expected  = hash_hmac(
+            'sha256',
+            $request->getContent(),
+            config('services.envia.webhook_secret')
+        );
+
+        if (!hash_equals($expected, (string) $signature)) {
+            return response('Invalid signature', 401);
+        }
+
+        $tracking = $request->input('trackingNumber');
+        $status   = $request->input('status'); // in_transit, out_for_delivery, delivered, ...
+
+        $order = Order::where('shipping_tracking_number', $tracking)->first();
+        if ($order) {
+            if ($status === 'delivered') {
+                $order->update(['status' => 'delivered']);
+                $order->user->notify(new OrderDelivered($order));
+            }
+        }
+
+        return response('OK', 200);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Mapeo de estados de Envia.com al estado logístico
+
+| Estado en Envia.com | Estado en `orders.status` |
+| --- | --- |
+| `label_generated` | `shipped` |
+| `picked_up`, `in_transit`, `out_for_delivery` | `shipped` (se conserva) |
+| `delivered` | `delivered` |
+| `returned`, `cancelled` | `cancelled` |
+
+<Info>
+  El `status` logístico solo avanza a `delivered` cuando Envia.com envía el evento correspondiente. Los estados intermedios se registran para efectos de notificación pero no modifican `orders.status`.
+</Info>
+
+## Rastreo unificado
+
+Todas las órdenes con guía comparten la URL de rastreo generada por `EnviaService::trackingUrl($carrier, $tracking)`. FusaShop muestra este enlace tanto en el detalle del pedido del consumidor como en la sección de pedidos del comerciante.
+
+<CardGroup cols={2}>
+  <Card title="Vista del consumidor" icon="user">
+    En `/shop/orders/{id}` el cliente ve la transportadora, el número de guía y el botón **Rastrear envío** que abre el rastreo de Envia.com.
+  </Card>
+
+  <Card title="Vista del comerciante" icon="store">
+    En `/merchant/orders/{id}` el comerciante encuentra el mismo enlace de rastreo, más la opción de descargar el rótulo PDF y reimprimirlo si fuera necesario.
+  </Card>
+</CardGroup>
+
+## Consideraciones para producción
+
+<Accordion title="Lista de verificación antes de ir a producción">
+  - Cambia `ENVIA_ENV=production` en el servidor de producción y sustituye la API key de test por la de producción.
+  - Configura `ENVIA_WEBHOOK_SECRET` con un secreto fuerte y registra la misma cadena en el panel de webhooks de Envia.com.
+  - Verifica que `shipping.webhook` esté excluido de CSRF en `VerifyCsrfToken`.
+  - Asegúrate de que la URL del webhook sea accesible públicamente (no `localhost`).
+  - Verifica que los campos de origen (`ENVIA_ORIGIN_*`) correspondan al centro de despacho real desde el que salen los envíos.
+  - Confirma que las direcciones de los consumidores incluyan ciudad y departamento válidos: Envia.com rechaza cotizaciones con direcciones incompletas.
+  - Revisa los logs en `storage/logs/laravel.log` para confirmar que los webhooks se están recibiendo y las firmas se validan correctamente.
+</Accordion>
